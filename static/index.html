@@ -65,6 +65,12 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .action-bar{padding:8px 18px;background:#ffffff;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;box-shadow:0 1px 4px rgba(0,0,0,.06)}
 .abar-info{font-size:11px;color:var(--text2)}.abar-info strong{color:var(--text)}
 .abar-sep{width:1px;height:20px;background:var(--border);margin:0 2px}
+.filter-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.filter-inp{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;min-width:120px;outline:none}
+.filter-inp:focus{border-color:var(--accent)}
+.filter-sel{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;outline:none}
+.sort-th{cursor:pointer;user-select:none}
+.sort-th span{opacity:.6;font-size:9px;margin-left:4px}
 
 /* ── Table ── */
 .tbl-wrap{flex:1;overflow:auto;padding:0;background:#fff}
@@ -209,6 +215,17 @@ iframe{width:100%;height:100%;border:none}
         Download All Merged
       </button>
 
+      <div class="abar-sep"></div>
+
+      <!-- Filters -->
+      <div class="filter-wrap">
+        <input class="filter-inp" id="f-vin" placeholder="Filter VIN">
+        <input class="filter-inp" id="f-make" placeholder="Filter Make">
+        <input class="filter-inp" id="f-model" placeholder="Filter Model">
+        <select class="filter-sel" id="f-format"><option value="">All formats</option></select>
+        <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
+      </div>
+
       <!-- Progress inline -->
       <span id="prog-txt" class="hidden" style="font-size:10px;color:var(--text2)">Generating...</span>
     </div>
@@ -219,16 +236,16 @@ iframe{width:100%;height:100%;border:none}
         <thead>
           <tr>
             <th class="check-col"><input type="checkbox" id="chk-all" onchange="toggleAll(this)"></th>
-            <th>VIN</th>
-            <th>Make</th>
-            <th>Model</th>
-            <th>Damages</th>
-            <th>Format</th>
+            <th class="sort-th" data-sort="vin">VIN <span id="sort-vin"></span></th>
+            <th class="sort-th" data-sort="make">Make <span id="sort-make"></span></th>
+            <th class="sort-th" data-sort="model">Model <span id="sort-model"></span></th>
+            <th class="sort-th" data-sort="damages">Damages <span id="sort-damages"></span></th>
+            <th class="sort-th" data-sort="format">Format <span id="sort-format"></span></th>
             <th>Part</th>
             <th>Type</th>
             <th>Extent</th>
             <th>Classification</th>
-            <th>Remark</th>
+            <th class="sort-th" data-sort="remark">Remark <span id="sort-remark"></span></th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -310,6 +327,8 @@ var CLS_MAP = {
 var RECORDS=[], VIN_GROUPS={};
 var ROWS=[];          // [{vin, make, model, format, isAuto, records, checked, manual}]
 var serverOK=false, templateStatus={}, allManualFields={};
+var FILTERS={vin:'',make:'',model:'',format:''};
+var SORT={key:'vin',dir:1}; // dir: 1 asc, -1 desc
 var activeFmtDD=null; // row index with open fmt dropdown
 var pendingAction=null;
 var previewVin=null, previewFmt=null, previewPdfUrl=null;
@@ -318,6 +337,8 @@ var previewVin=null, previewFmt=null, previewPdfUrl=null;
 window.onload=function(){
   loadUser();
   checkServer();
+  bindSorting();
+  bindFilters();
   document.addEventListener('click', function(){ closeFmtDD(); });
 };
 
@@ -331,6 +352,7 @@ fetch('/api/auth/me').then(function(r){
     if(u.role==='admin') document.getElementById('admin-link').style.display='inline';
     ALLOWED_FORMATS = u.allowed_formats || null;
     applyAllowedFormats();
+    updateFormatFilterOptions();
   }).catch(function(){ window.location.href='/login'; });
 
 function applyAllowedFormats(){
@@ -444,6 +466,7 @@ function buildRows(){
     });
   });
   updateSelCount();
+  updateFormatFilterOptions();
   // Update action bar info
   var makes={};
   ROWS.forEach(function(r){if(r.make)makes[r.make]=true;});
@@ -457,8 +480,10 @@ function buildRows(){
 function renderTable(){
   var tbody=document.getElementById('tbl-body');
   var html='';
-  for(var i=0;i<ROWS.length;i++){
-    var row=ROWS[i], r0=row.records[0];
+  var visible=getVisibleRows();
+  for(var vi=0;vi<visible.length;vi++){
+    var idx=visible[vi].idx;
+    var row=visible[vi].row, r0=row.records[0];
     // Aggregate damages for display
     var parts=row.records.map(function(r){return r.damage_part_code;}).join(', ');
     var types=row.records.map(function(r){return r.damage_type_code;}).join(', ');
@@ -469,15 +494,15 @@ function renderTable(){
     }).join(' ');
     var remarks=row.remark||'';
     var fmtCls=row.isAuto?'auto':'manual';
-    html+='<tr class="'+(row.checked?'sel':'')+'" id="tr-'+i+'">'
-      +'<td style="text-align:center"><input type="checkbox" '+(row.checked?'checked':'')+' onchange="toggleRow('+i+',this)"></td>'
+    html+='<tr class="'+(row.checked?'sel':'')+'" id="tr-'+idx+'">'
+      +'<td style="text-align:center"><input type="checkbox" '+(row.checked?'checked':'')+' onchange="toggleRow('+idx+',this)"></td>'
       +'<td class="mono">'+row.vin+'</td>'
       +'<td>'+row.make+'</td>'
       +'<td>'+row.model+'</td>'
       +'<td style="color:var(--text2)">'+row.records.length+'</td>'
       +'<td>'
         +'<div class="fmt-select-wrap">'
-          +'<span class="fmt-pill '+fmtCls+'" onclick="openFmtDD('+i+',event)">'
+          +'<span class="fmt-pill '+fmtCls+'" onclick="openFmtDD('+idx+',event)">'
             +(row.isAuto?'<span class="fmt-auto-tag">A</span>':'')+row.format+' &#9660;'
           +'</span>'
         +'</div>'
@@ -486,15 +511,108 @@ function renderTable(){
       +'<td class="mono" style="max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+types+'</td>'
       +'<td class="mono">'+extents+'</td>'
       +'<td style="max-width:120px">'+classes+'</td>'
-      +'<td><input type="text" class="remark-input" data-idx="'+i+'" value="'+escHtml(remarks)+'" placeholder="Add remark..."></td>'
+      +'<td><input type="text" class="remark-input" data-idx="'+idx+'" value="'+escHtml(remarks)+'" placeholder="Add remark..."></td>'
       +'<td style="white-space:nowrap">'
-        +'<button class="btn btn-xs" style="background:#eef4fc;border:1px solid #1B4F8A;color:#1B4F8A;font-weight:600" onclick="previewVinRow('+i+')">Preview</button>'
-        +'<button class="btn btn-accent btn-xs" onclick="downloadRowPDF('+i+')" style="margin-left:4px">Download</button>'
+        +'<button class="btn btn-xs" style="background:#eef4fc;border:1px solid #1B4F8A;color:#1B4F8A;font-weight:600" onclick="previewVinRow('+idx+')">Preview</button>'
+        +'<button class="btn btn-accent btn-xs" onclick="downloadRowPDF('+idx+')" style="margin-left:4px">Download</button>'
       +'</td>'
     +'</tr>';
   }
   tbody.innerHTML=html;
   wireRemarkInputs();
+  updateSortIndicators();
+  updateHeaderCheck();
+}
+
+function updateFormatFilterOptions(){
+  var sel=document.getElementById('f-format');
+  if(!sel) return;
+  var current=sel.value||'';
+  var opts=['<option value=\"\">All formats</option>'];
+  FORMATS.forEach(function(f){
+    opts.push('<option value=\"'+f+'\">'+f+'</option>');
+  });
+  sel.innerHTML=opts.join('');
+  if(current) sel.value=current;
+}
+
+function getVisibleRows(){
+  var list=[];
+  var fvin=(FILTERS.vin||'').toLowerCase();
+  var fmake=(FILTERS.make||'').toLowerCase();
+  var fmodel=(FILTERS.model||'').toLowerCase();
+  var fformat=(FILTERS.format||'').toUpperCase();
+  for(var i=0;i<ROWS.length;i++){
+    var r=ROWS[i];
+    if(fvin && String(r.vin||'').toLowerCase().indexOf(fvin)<0) continue;
+    if(fmake && String(r.make||'').toLowerCase().indexOf(fmake)<0) continue;
+    if(fmodel && String(r.model||'').toLowerCase().indexOf(fmodel)<0) continue;
+    if(fformat && String(r.format||'').toUpperCase()!==fformat) continue;
+    list.push({idx:i,row:r});
+  }
+  list.sort(function(a,b){
+    var ka=a.row, kb=b.row, va='', vb='';
+    if(SORT.key==='vin'){va=ka.vin||''; vb=kb.vin||'';}
+    else if(SORT.key==='make'){va=ka.make||''; vb=kb.make||'';}
+    else if(SORT.key==='model'){va=ka.model||''; vb=kb.model||'';}
+    else if(SORT.key==='damages'){va=ka.records.length; vb=kb.records.length;}
+    else if(SORT.key==='format'){va=ka.format||''; vb=kb.format||'';}
+    else if(SORT.key==='remark'){va=ka.remark||''; vb=kb.remark||'';}
+    if(typeof va==='string') va=va.toLowerCase();
+    if(typeof vb==='string') vb=vb.toLowerCase();
+    if(va<vb) return -1*SORT.dir;
+    if(va>vb) return 1*SORT.dir;
+    return 0;
+  });
+  return list;
+}
+
+function updateSortIndicators(){
+  var keys=['vin','make','model','damages','format','remark'];
+  keys.forEach(function(k){
+    var el=document.getElementById('sort-'+k);
+    if(!el) return;
+    if(SORT.key!==k){el.textContent='';return;}
+    el.textContent = SORT.dir===1?'▲':'▼';
+  });
+}
+
+function bindSorting(){
+  var ths=document.querySelectorAll('.sort-th');
+  for(var i=0;i<ths.length;i++){
+    ths[i].addEventListener('click', function(e){
+      var k=e.currentTarget.getAttribute('data-sort');
+      if(!k) return;
+      if(SORT.key===k){SORT.dir = SORT.dir*-1;}
+      else {SORT.key=k; SORT.dir=1;}
+      renderTable();
+    });
+  }
+}
+
+function bindFilters(){
+  var vin=document.getElementById('f-vin');
+  var make=document.getElementById('f-make');
+  var model=document.getElementById('f-model');
+  var format=document.getElementById('f-format');
+  if(vin) vin.addEventListener('input', function(){FILTERS.vin=vin.value; renderTable(); updateSelCount();});
+  if(make) make.addEventListener('input', function(){FILTERS.make=make.value; renderTable(); updateSelCount();});
+  if(model) model.addEventListener('input', function(){FILTERS.model=model.value; renderTable(); updateSelCount();});
+  if(format) format.addEventListener('change', function(){FILTERS.format=format.value; renderTable(); updateSelCount();});
+}
+
+function clearFilters(){
+  FILTERS={vin:'',make:'',model:'',format:''};
+  var vin=document.getElementById('f-vin');
+  var make=document.getElementById('f-make');
+  var model=document.getElementById('f-model');
+  var format=document.getElementById('f-format');
+  if(vin) vin.value='';
+  if(make) make.value='';
+  if(model) model.value='';
+  if(format) format.value='';
+  renderTable();
+  updateSelCount();
 }
 
 function wireRemarkInputs(){
@@ -552,21 +670,33 @@ function toggleRow(idx,chk){
   var tr=document.getElementById('tr-'+idx);
   if(tr) tr.className=chk.checked?'sel':'';
   updateSelCount();
+  updateHeaderCheck();
 }
 function toggleAll(chk){
-  ROWS.forEach(function(r){r.checked=chk.checked;});
+  var visible=getVisibleRows();
+  visible.forEach(function(v){v.row.checked=chk.checked;});
   renderTable();
   updateSelCount();
+  updateHeaderCheck();
 }
 function selectAll(val){
-  ROWS.forEach(function(r){r.checked=val;});
+  var visible=getVisibleRows();
+  visible.forEach(function(v){v.row.checked=val;});
   document.getElementById('chk-all').checked=val;
   renderTable();
   updateSelCount();
+  updateHeaderCheck();
 }
 function updateSelCount(){
-  var n=ROWS.filter(function(r){return r.checked;}).length;
+  var visible=getVisibleRows();
+  var n=visible.filter(function(v){return v.row.checked;}).length;
   document.getElementById('sel-count').textContent=n+' selected';
+}
+function updateHeaderCheck(){
+  var visible=getVisibleRows();
+  if(!visible.length) return;
+  var all=visible.every(function(v){return v.row.checked;});
+  document.getElementById('chk-all').checked=all;
 }
 
 function enableButtons(){
@@ -673,7 +803,8 @@ function doSinglePDF(row){
 
 /* ── Bulk downloads ───────────────────────────────────── */
 function downloadSelected(mode){
-  var rows=ROWS.filter(function(r){return r.checked;});
+  var visible=getVisibleRows();
+  var rows=visible.filter(function(v){return v.row.checked;}).map(function(v){return v.row;});
   if(!rows.length){toast('No VINs selected','err');return;}
   checkManualAndDownload(rows, mode);
 }

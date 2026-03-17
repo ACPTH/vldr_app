@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VLDR Generator — User Manual</title>
+<style>
+  :root{--text:#1a2332;--muted:#5b6b83;--accent:#1B4F8A;--border:#d7deea;}
+  body{font-family:Arial, Helvetica, sans-serif;color:var(--text);margin:36px;line-height:1.5;}
+  h1,h2,h3{color:var(--accent);margin:18px 0 8px;}
+  h1{font-size:24px}
+  h2{font-size:18px;border-bottom:1px solid var(--border);padding-bottom:4px}
+  h3{font-size:14px}
+  p,li{font-size:12px}
+  ul,ol{margin:6px 0 12px 18px}
+  .meta{color:var(--muted);font-size:11px}
+  .callout{background:#f5f8ff;border:1px solid var(--border);padding:10px 12px;border-radius:6px;font-size:12px}
+  .screenshot{border:1px dashed var(--border);border-radius:6px;padding:10px;color:var(--muted);font-size:11px;margin:8px 0}
+  .kbd{font-family:Consolas, monospace;font-size:11px;background:#f2f4f8;border:1px solid var(--border);padding:2px 6px;border-radius:4px}
+  .pagebreak{page-break-after:always}
+</style>
+</head>
+<body>
+  <h1>VLDR Generator — User Manual</h1>
+  <p class="meta">Version: 1.0 • Language: English</p>
+
+  <h2>1. Overview</h2>
+  <p>The VLDR Generator creates Vehicle Loss &amp; Damage Report PDFs from Excel files. It supports multiple OEM templates (BMW, FCA, Renault, Stellantis, etc.) and allows batch downloads.</p>
+
+  <h2>2. Access &amp; Login</h2>
+  <ol>
+    <li>Open the app URL in your browser.</li>
+    <li>Log in with your username and password.</li>
+    <li>If you have admin privileges, an <strong>Admin</strong> link will appear in the top bar.</li>
+  </ol>
+  <div class="screenshot">Screenshot placeholder: Login screen</div>
+
+  <h2>3. Uploading an Excel File</h2>
+  <ol>
+    <li>Drag &amp; drop an Excel file into the drop zone, or click to upload.</li>
+    <li>The app reads the sheet named <strong>damage_list</strong>.</li>
+    <li>Once loaded, the VIN table appears.</li>
+  </ol>
+  <div class="callout">
+    Required columns (typical): vin, make, model, date, damage_part_code, damage_type_code, damage_extent_code, damage_classification, damage_remark.
+  </div>
+
+  <h2>4. Understanding the Table</h2>
+  <ul>
+    <li><strong>VIN</strong>: Unique vehicle identifier.</li>
+    <li><strong>Format</strong>: Auto-selected by make (can be overridden).</li>
+    <li><strong>Damage</strong> columns: Part, Type, Extent, Classification.</li>
+    <li><strong>Remark</strong>: You can edit; the value is applied to all damage lines for that VIN.</li>
+  </ul>
+  <div class="screenshot">Screenshot placeholder: VIN table</div>
+
+  <h2>5. Format Selection</h2>
+  <p>Click the format pill to choose a different template. If your user account is restricted, you will only see allowed formats.</p>
+  <div class="screenshot">Screenshot placeholder: Format dropdown</div>
+
+  <h2>6. Manual Fields</h2>
+  <p>Some formats require extra fields (e.g., Vessel, Customer, Transport Ref). When you download, a modal appears to fill these values.</p>
+  <div class="screenshot">Screenshot placeholder: Manual fields modal</div>
+
+  <h2>7. Preview</h2>
+  <p>Click <strong>Preview</strong> to generate a single-PDF preview for one VIN.</p>
+
+  <h2>8. Download Options</h2>
+  <ul>
+    <li><strong>Download Selected (ZIP)</strong>: One PDF per VIN.</li>
+    <li><strong>Download All (ZIP)</strong>: One PDF per VIN for all rows.</li>
+    <li><strong>Download All Merged</strong>: One merged PDF per format.</li>
+  </ul>
+
+  <h2>9. Queue &amp; Load Status</h2>
+  <p>The status bar displays active jobs, queued jobs, and average time. If the server is busy, requests will wait briefly instead of failing immediately.</p>
+  <div class="screenshot">Screenshot placeholder: Queue/Load status bar</div>
+
+  <h2>10. Admin Panel</h2>
+  <p>Admins can create users, reset passwords, enable/disable accounts, and limit formats per user.</p>
+  <ul>
+    <li>Open <strong>/admin</strong> in the browser.</li>
+    <li>Use the Formats checkboxes to restrict each user.</li>
+  </ul>
+  <div class="screenshot">Screenshot placeholder: Admin panel</div>
+
+  <h2>11. Troubleshooting</h2>
+  <ul>
+    <li><strong>“Server not responding”</strong>: Check if the backend is running or redeployed.</li>
+    <li><strong>Blank PDFs</strong>: Ensure templates are correct and pdftk is installed on the server.</li>
+    <li><strong>Login fails</strong>: Verify DATABASE_URL and Supabase credentials.</li>
+  </ul>
+
+  <h2>12. Tips for Faster Output</h2>
+  <ul>
+    <li>Limit concurrency with <span class="kbd">VLDR_MAX_JOBS</span>.</li>
+    <li>Use a paid Render plan for more CPU/RAM.</li>
+    <li>Keep templates optimized and avoid oversized fields.</li>
+  </ul>
+
+  <div class="pagebreak"></div>
+  <h2>Appendix: Quick Start Checklist</h2>
+  <ol>
+    <li>Login</li>
+    <li>Upload Excel</li>
+    <li>Review VINs + formats</li>
+    <li>Fill manual fields</li>
+    <li>Preview or Download</li>
+  </ol>
+</body>
+</html>
