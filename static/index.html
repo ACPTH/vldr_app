@@ -68,7 +68,13 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .filter-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .filter-inp{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;min-width:120px;outline:none}
 .filter-inp:focus{border-color:var(--accent)}
-.filter-sel{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;outline:none;min-width:140px}
+.filter-dd{position:relative}
+.filter-btn{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:11px;min-width:140px;display:inline-flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer}
+.filter-menu{position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--border2);border-radius:8px;min-width:180px;z-index:20;box-shadow:0 10px 28px rgba(0,0,0,.12);display:none;max-height:220px;overflow:auto;padding:6px}
+.filter-menu.open{display:block}
+.filter-item{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 6px;border-radius:4px}
+.filter-item:hover{background:#eef4fc}
+.filter-item input{width:12px;height:12px}
 .sort-th{cursor:pointer;user-select:none}
 .sort-th span{opacity:.6;font-size:9px;margin-left:4px}
 
@@ -220,8 +226,18 @@ iframe{width:100%;height:100%;border:none}
       <!-- Filters -->
       <div class="filter-wrap">
         <input class="filter-inp" id="f-vin" placeholder="Filter VIN">
-        <select class="filter-sel" id="f-make" multiple title="Filter Make (multi-select)"></select>
-        <select class="filter-sel" id="f-class" multiple title="Filter Classification (multi-select)"></select>
+        <div class="filter-dd" id="dd-make">
+          <button class="filter-btn" type="button" onclick="toggleFilterDD('make')">
+            <span id="f-make-label">Make (all)</span><span>▼</span>
+          </button>
+          <div class="filter-menu" id="f-make-menu"></div>
+        </div>
+        <div class="filter-dd" id="dd-class">
+          <button class="filter-btn" type="button" onclick="toggleFilterDD('class')">
+            <span id="f-class-label">Classification (all)</span><span>▼</span>
+          </button>
+          <div class="filter-menu" id="f-class-menu"></div>
+        </div>
         <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
       </div>
 
@@ -329,6 +345,7 @@ var serverOK=false, templateStatus={}, allManualFields={};
 var FILTERS={vin:'',makes:[],classes:[]};
 var SORT={key:'vin',dir:1}; // dir: 1 asc, -1 desc
 var activeFmtDD=null; // row index with open fmt dropdown
+var activeFilterDD=null; // 'make' | 'class'
 var pendingAction=null;
 var previewVin=null, previewFmt=null, previewPdfUrl=null;
 
@@ -537,28 +554,30 @@ function renderTable(){
 }
 
 function updateFilterOptions(){
-  var makeSel=document.getElementById('f-make');
-  var classSel=document.getElementById('f-class');
-  if(makeSel){
+  var makeMenu=document.getElementById('f-make-menu');
+  var classMenu=document.getElementById('f-class-menu');
+  if(makeMenu){
     var makes={};
     ROWS.forEach(function(r){ if(r.make) makes[r.make]=true; });
     var optsM=[];
     Object.keys(makes).sort().forEach(function(m){
-      optsM.push('<option value=\"'+m+'\">'+m+'</option>');
+      optsM.push('<label class="filter-item"><input type="checkbox" value=\"'+m+'\">'+m+'</label>');
     });
-    makeSel.innerHTML=optsM.join('');
+    makeMenu.innerHTML=optsM.join('') || '<div class="filter-item" style="color:var(--text3)">No makes</div>';
   }
-  if(classSel){
+  if(classMenu){
     var classes={};
     ROWS.forEach(function(r){
       r.records.forEach(function(x){ if(x.damage_classification) classes[x.damage_classification]=true; });
     });
     var optsC=[];
     Object.keys(classes).sort().forEach(function(c){
-      optsC.push('<option value=\"'+c+'\">'+c+'</option>');
+      optsC.push('<label class="filter-item"><input type="checkbox" value=\"'+c+'\">'+c+'</label>');
     });
-    classSel.innerHTML=optsC.join('');
+    classMenu.innerHTML=optsC.join('') || '<div class="filter-item" style="color:var(--text3)">No classes</div>';
   }
+  wireFilterMenus();
+  updateFilterLabels();
 }
 
 function getVisibleRows(){
@@ -625,29 +644,79 @@ function bindSorting(){
 
 function bindFilters(){
   var vin=document.getElementById('f-vin');
-  var make=document.getElementById('f-make');
-  var clas=document.getElementById('f-class');
   if(vin) vin.addEventListener('input', function(){FILTERS.vin=vin.value; renderTable(); updateSelCount();});
-  if(make) make.addEventListener('change', function(){
-    FILTERS.makes=Array.from(make.selectedOptions).map(function(o){return o.value;});
-    renderTable(); updateSelCount();
-  });
-  if(clas) clas.addEventListener('change', function(){
-    FILTERS.classes=Array.from(clas.selectedOptions).map(function(o){return o.value;});
-    renderTable(); updateSelCount();
+  document.addEventListener('click', function(e){
+    if(!activeFilterDD) return;
+    var dd = document.getElementById(activeFilterDD==='make'?'dd-make':'dd-class');
+    if(dd && dd.contains(e.target)) return;
+    closeFilterDD();
   });
 }
 
 function clearFilters(){
   FILTERS={vin:'',makes:[],classes:[]};
   var vin=document.getElementById('f-vin');
-  var make=document.getElementById('f-make');
-  var clas=document.getElementById('f-class');
   if(vin) vin.value='';
-  if(make) Array.from(make.options).forEach(function(o){o.selected=false;});
-  if(clas) Array.from(clas.options).forEach(function(o){o.selected=false;});
+  // clear checkboxes
+  var menus=[document.getElementById('f-make-menu'), document.getElementById('f-class-menu')];
+  menus.forEach(function(menu){
+    if(!menu) return;
+    Array.from(menu.querySelectorAll('input[type=checkbox]')).forEach(function(cb){cb.checked=false;});
+  });
+  updateFilterLabels();
   renderTable();
   updateSelCount();
+}
+
+function wireFilterMenus(){
+  var makeMenu=document.getElementById('f-make-menu');
+  var classMenu=document.getElementById('f-class-menu');
+  if(makeMenu){
+    makeMenu.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        FILTERS.makes=Array.from(makeMenu.querySelectorAll('input[type=checkbox]:checked')).map(function(x){return x.value;});
+        updateFilterLabels();
+        renderTable(); updateSelCount();
+      });
+    });
+  }
+  if(classMenu){
+    classMenu.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        FILTERS.classes=Array.from(classMenu.querySelectorAll('input[type=checkbox]:checked')).map(function(x){return x.value;});
+        updateFilterLabels();
+        renderTable(); updateSelCount();
+      });
+    });
+  }
+}
+
+function updateFilterLabels(){
+  var makeLabel=document.getElementById('f-make-label');
+  var classLabel=document.getElementById('f-class-label');
+  if(makeLabel){
+    makeLabel.textContent = FILTERS.makes.length?('Make ('+FILTERS.makes.length+')'):'Make (all)';
+  }
+  if(classLabel){
+    classLabel.textContent = FILTERS.classes.length?('Classification ('+FILTERS.classes.length+')'):'Classification (all)';
+  }
+}
+
+function toggleFilterDD(kind){
+  var menu=document.getElementById(kind==='make'?'f-make-menu':'f-class-menu');
+  if(!menu) return;
+  if(activeFilterDD && activeFilterDD!==kind) closeFilterDD();
+  var open = menu.classList.contains('open');
+  if(open){ closeFilterDD(); return; }
+  menu.classList.add('open');
+  activeFilterDD=kind;
+}
+function closeFilterDD(){
+  var mm=document.getElementById('f-make-menu');
+  var cm=document.getElementById('f-class-menu');
+  if(mm) mm.classList.remove('open');
+  if(cm) cm.classList.remove('open');
+  activeFilterDD=null;
 }
 
 function wireRemarkInputs(){
