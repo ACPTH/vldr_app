@@ -3,8 +3,8 @@ VLDR Generator - Flask Backend
 Run: python app.py  |  Open: http://localhost:5050
 Place PDF templates in ./templates/ folder (same directory as app.py)
 """
-import os, io, zipfile, json, base64, time, threading
-from collections import deque
+import os, io, zipfile, json, base64, time, threading, hashlib
+from collections import deque, OrderedDict
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
 from pypdf import PdfReader, PdfWriter
@@ -29,6 +29,8 @@ _job_lock = threading.Lock()
 _active_jobs = 0
 _queued_jobs = 0
 _recent_times = deque(maxlen=30)
+MAX_CACHE = int(os.environ.get('VLDR_CACHE_MAX', '200'))
+_pdf_cache = OrderedDict()  # key -> bytes
 
 def _start_job_or_queue():
     """Acquire a job slot. Wait up to QUEUE_TIMEOUT. Returns (ok, waited_sec)."""
@@ -57,6 +59,53 @@ def _job_stats():
         queued = _queued_jobs
     avg = sum(_recent_times) / len(_recent_times) if _recent_times else 0
     return {'active': active, 'queued': queued, 'max': MAX_JOBS, 'avg_sec': round(avg, 2)}
+
+def _is_empty_damage(val):
+    t = str(val or '').strip().lower()
+    return t in ('', '-', 'nan', 'none')
+
+def filter_damage_records(records):
+    """Drop lines with no real damage info."""
+    out = []
+    for r in records or []:
+        if not r: continue
+        p = r.get('damage_part_code', '')
+        t = r.get('damage_type_code', '')
+        e = r.get('damage_extent_code', '')
+        c = r.get('damage_classification', '')
+        if _is_empty_damage(p) and _is_empty_damage(t) and _is_empty_damage(e) and _is_empty_damage(c):
+            continue
+        out.append(r)
+    return out
+
+def _cache_get(key):
+    if key in _pdf_cache:
+        _pdf_cache.move_to_end(key)
+        return _pdf_cache[key]
+    return None
+
+def _cache_set(key, data_bytes):
+    _pdf_cache[key] = data_bytes
+    _pdf_cache.move_to_end(key)
+    while len(_pdf_cache) > MAX_CACHE:
+        _pdf_cache.popitem(last=False)
+
+def _hash_records(records):
+    return hashlib.md5(json.dumps(records, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+
+def get_cached_flat(fmt, vin, records, manual):
+    """Return BytesIO of flattened PDF, cached per VIN+fmt+manual+records."""
+    key = (fmt, vin, _hash_records(records), json.dumps(manual or {}, sort_keys=True, ensure_ascii=False))
+    cached = _cache_get(key)
+    if cached:
+        return io.BytesIO(cached)
+    tpl = get_template(fmt)
+    fsz = FONT_SIZES.get(fmt, {})
+    comb_skip = comb_skip_for(fmt)
+    flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, records, manual), fsz, comb_skip=comb_skip)
+    data = flat.read()
+    _cache_set(key, data)
+    return io.BytesIO(data)
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
 from auth import login_required, admin_required, get_all_users, create_user, update_user, delete_user
@@ -489,26 +538,20 @@ def group_by_vin(records):
     return g
 
 def make_merged_pdf(fmt, target_vins, vin_groups, manual):
-    tpl = get_template(fmt)
-    fsz = FONT_SIZES.get(fmt, {})
-    comb_skip = comb_skip_for(fmt)
     merged = PdfWriter()
     for vin in target_vins:
         if vin not in vin_groups: continue
-        flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, vin_groups[vin], manual), fsz, comb_skip=comb_skip)
+        flat = get_cached_flat(fmt, vin, vin_groups[vin], manual)
         merged.append(PdfReader(flat))
     out = io.BytesIO(); merged.write(out); out.seek(0)
     return out
 
 def make_individual_zip(fmt, target_vins, vin_groups, manual):
-    tpl = get_template(fmt)
-    fsz = FONT_SIZES.get(fmt, {})
-    comb_skip = comb_skip_for(fmt)
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for vin in target_vins:
             if vin not in vin_groups: continue
-            flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, vin_groups[vin], manual), fsz, comb_skip=comb_skip)
+            flat = get_cached_flat(fmt, vin, vin_groups[vin], manual)
             safe = vin.replace('/','_').replace('\\','_')
             zf.writestr(safe+'.pdf', flat.read())
     zip_buf.seek(0)
@@ -688,8 +731,10 @@ def generate():
     try:
         try: tpl = get_template(fmt)
         except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
-        vg = group_by_vin(data.get('records',[]))
+        recs = filter_damage_records(data.get('records',[]))
+        vg = group_by_vin(recs)
         target = data.get('vins',[]) or list(vg.keys())
+        if not vg: return jsonify({'error':'No valid damages found'}), 400
         try:
             buf = make_merged_pdf(fmt, target, vg, data.get('manual',{}))
         except Exception as e:
@@ -717,8 +762,10 @@ def generate_individual():
     try:
         try: get_template(fmt)
         except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
-        vg = group_by_vin(data.get('records',[]))
+        recs = filter_damage_records(data.get('records',[]))
+        vg = group_by_vin(recs)
         target = data.get('vins',[]) or list(vg.keys())
+        if not vg: return jsonify({'error':'No valid damages found'}), 400
         try:
             buf = make_individual_zip(fmt, target, vg, data.get('manual',{}))
         except Exception as e:
@@ -733,8 +780,10 @@ def generate_all():
     """All formats, merged — ZIP with one merged PDF per format."""
     data    = request.json
     manuals = data.get('manuals', {})
-    vg      = group_by_vin(data.get('records',[]))
+    recs    = filter_damage_records(data.get('records',[]))
+    vg      = group_by_vin(recs)
     target  = data.get('vins',[]) or list(vg.keys())
+    if not vg: return jsonify({'error':'No valid damages found'}), 400
     ok, waited = _start_job_or_queue()
     if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
@@ -759,8 +808,10 @@ def generate_all_individual():
     """All formats, individual — ZIP/{fmt}/VLDR_{fmt}_{VIN}.pdf"""
     data    = request.json
     manuals = data.get('manuals', {})
-    vg      = group_by_vin(data.get('records',[]))
+    recs    = filter_damage_records(data.get('records',[]))
+    vg      = group_by_vin(recs)
     target  = data.get('vins',[]) or list(vg.keys())
+    if not vg: return jsonify({'error':'No valid damages found'}), 400
     ok, waited = _start_job_or_queue()
     if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
@@ -770,18 +821,10 @@ def generate_all_individual():
             for fmt in BUILDERS:
                 if not is_format_allowed(fmt): continue
                 try:
-                    tpl = get_template(fmt)
-                    fsz = FONT_SIZES.get(fmt,{})
                     manual = manuals.get(fmt,{})
-                    comb_skip = comb_skip_for(fmt)
                     for vin in target:
                         if vin not in vg: continue
-                        flat = fill_pdf_and_overlay_comb(
-                            tpl,
-                            BUILDERS[fmt](vin, vg[vin], manual),
-                            fsz,
-                            comb_skip=comb_skip
-                        )
+                        flat = get_cached_flat(fmt, vin, vg[vin], manual)
                         safe = vin.replace('/','_').replace('\\','_')
                         zf.writestr(fmt+'/'+safe+'.pdf', flat.read())  # VIN.pdf only
                 except Exception:
@@ -811,6 +854,7 @@ def preview():
     except FileNotFoundError as e:
         return jsonify({'error': str(e)}), 404
 
+    recs = filter_damage_records(recs)
     vg = group_by_vin(recs)
     if vin not in vg:
         return jsonify({'error': 'VIN not found: ' + vin}), 404
@@ -820,9 +864,7 @@ def preview():
     start_ts = time.time()
     try:
         try:
-            comb_skip = comb_skip_for(fmt)
-            flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, vg[vin], manual),
-                                             FONT_SIZES.get(fmt, {}), comb_skip=comb_skip)
+            flat = get_cached_flat(fmt, vin, vg[vin], manual)
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     finally:
@@ -844,7 +886,7 @@ def generate_batch():
     data   = request.json
     items  = data.get('items', [])   # [{vin, format, manual}]
     mode   = data.get('mode', 'individual')
-    recs   = data.get('records', [])
+    recs   = filter_damage_records(data.get('records', []))
     vg     = group_by_vin(recs)
 
     if mode == 'individual':
@@ -863,15 +905,7 @@ def generate_batch():
                     if not is_format_allowed(fmt):
                         continue
                     try:
-                        tpl = get_template(fmt)
-                        fsz = FONT_SIZES.get(fmt, {})
-                        comb_skip = comb_skip_for(fmt)
-                        flat = fill_pdf_and_overlay_comb(
-                            tpl,
-                            BUILDERS[fmt](vin, vg[vin], manual),
-                            fsz,
-                            comb_skip=comb_skip
-                        )          # flatten = non-editable
+                        flat = get_cached_flat(fmt, vin, vg[vin], manual)  # flatten = non-editable
                         safe = vin.replace('/', '_').replace('\\', '_')
                         zf.writestr(safe + '.pdf', flat.read()) # VIN.pdf only
                     except Exception:
@@ -902,18 +936,10 @@ def generate_batch():
                     if fmt not in BUILDERS: continue
                     if not is_format_allowed(fmt): continue
                     try:
-                        tpl = get_template(fmt)
-                        fsz = FONT_SIZES.get(fmt, {})
                         merged = PdfWriter()
-                        comb_skip = comb_skip_for(fmt)
                         for vin in vins:
                             if vin not in vg: continue
-                            flat = fill_pdf_and_overlay_comb(
-                                tpl,
-                                BUILDERS[fmt](vin, vg[vin], manual_by_fmt.get(fmt,{})),
-                                fsz,
-                                comb_skip=comb_skip
-                            )
+                            flat = get_cached_flat(fmt, vin, vg[vin], manual_by_fmt.get(fmt,{}))
                             merged.append(PdfReader(flat))
                         pdf_out = io.BytesIO(); merged.write(pdf_out)
                         zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.getvalue())

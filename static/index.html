@@ -72,9 +72,13 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .filter-btn{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:11px;min-width:140px;display:inline-flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer}
 .filter-menu{position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--border2);border-radius:8px;min-width:180px;z-index:20;box-shadow:0 10px 28px rgba(0,0,0,.12);display:none;max-height:220px;overflow:auto;padding:6px}
 .filter-menu.open{display:block}
+.filter-search{width:100%;padding:5px 6px;font-size:11px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:#f8fafc}
 .filter-item{display:flex;align-items:center;gap:6px;font-size:11px;padding:4px 6px;border-radius:4px}
 .filter-item:hover{background:#eef4fc}
 .filter-item input{width:12px;height:12px}
+.filter-chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:#eef4fc;border:1px solid #7aaad8;color:#1B4F8A;border-radius:999px;padding:3px 8px;font-size:10px;display:inline-flex;align-items:center;gap:6px}
+.chip button{background:none;border:none;color:#1B4F8A;font-size:11px;cursor:pointer;line-height:1}
 .sort-th{cursor:pointer;user-select:none}
 .sort-th span{opacity:.6;font-size:9px;margin-left:4px}
 
@@ -214,6 +218,9 @@ iframe{width:100%;height:100%;border:none}
       <button class="btn btn-accent btn-sm" id="btn-dl-sel" onclick="downloadSelected('individual')" data-off>
         Download Selected (ZIP)
       </button>
+      <button class="btn btn-ghost btn-sm" id="btn-dl-filtered" onclick="downloadFiltered('individual')" data-off>
+        Download Filtered (ZIP)
+      </button>
       <button class="btn btn-green btn-sm" id="btn-dl-all" onclick="downloadAll('individual')" data-off>
         Download All (ZIP)
       </button>
@@ -240,6 +247,9 @@ iframe{width:100%;height:100%;border:none}
         </div>
         <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
       </div>
+
+      <div class="abar-sep"></div>
+      <div class="filter-chips" id="filter-chips"></div>
 
       <!-- Progress inline -->
       <span id="prog-txt" class="hidden" style="font-size:10px;color:var(--text2)">Generating...</span>
@@ -559,7 +569,7 @@ function updateFilterOptions(){
   if(makeMenu){
     var makes={};
     ROWS.forEach(function(r){ if(r.make) makes[r.make]=true; });
-    var optsM=[];
+    var optsM=['<input class="filter-search" id="f-make-search" placeholder="Search make...">'];
     Object.keys(makes).sort().forEach(function(m){
       optsM.push('<label class="filter-item"><input type="checkbox" value=\"'+m+'\">'+m+'</label>');
     });
@@ -570,7 +580,7 @@ function updateFilterOptions(){
     ROWS.forEach(function(r){
       r.records.forEach(function(x){ if(x.damage_classification) classes[x.damage_classification]=true; });
     });
-    var optsC=[];
+    var optsC=['<input class="filter-search" id="f-class-search" placeholder="Search classification...">'];
     Object.keys(classes).sort().forEach(function(c){
       optsC.push('<label class="filter-item"><input type="checkbox" value=\"'+c+'\">'+c+'</label>');
     });
@@ -663,6 +673,7 @@ function clearFilters(){
     if(!menu) return;
     Array.from(menu.querySelectorAll('input[type=checkbox]')).forEach(function(cb){cb.checked=false;});
   });
+  renderFilterChips();
   updateFilterLabels();
   renderTable();
   updateSelCount();
@@ -672,6 +683,16 @@ function wireFilterMenus(){
   var makeMenu=document.getElementById('f-make-menu');
   var classMenu=document.getElementById('f-class-menu');
   if(makeMenu){
+    var makeSearch=document.getElementById('f-make-search');
+    if(makeSearch){
+      makeSearch.addEventListener('input', function(){
+        var q=makeSearch.value.toLowerCase();
+        makeMenu.querySelectorAll('.filter-item').forEach(function(it){
+          var t=it.textContent.toLowerCase();
+          it.style.display = t.indexOf(q)>=0?'flex':'none';
+        });
+      });
+    }
     makeMenu.querySelectorAll('input[type=checkbox]').forEach(function(cb){
       cb.addEventListener('change', function(){
         FILTERS.makes=Array.from(makeMenu.querySelectorAll('input[type=checkbox]:checked')).map(function(x){return x.value;});
@@ -681,6 +702,16 @@ function wireFilterMenus(){
     });
   }
   if(classMenu){
+    var classSearch=document.getElementById('f-class-search');
+    if(classSearch){
+      classSearch.addEventListener('input', function(){
+        var q=classSearch.value.toLowerCase();
+        classMenu.querySelectorAll('.filter-item').forEach(function(it){
+          var t=it.textContent.toLowerCase();
+          it.style.display = t.indexOf(q)>=0?'flex':'none';
+        });
+      });
+    }
     classMenu.querySelectorAll('input[type=checkbox]').forEach(function(cb){
       cb.addEventListener('change', function(){
         FILTERS.classes=Array.from(classMenu.querySelectorAll('input[type=checkbox]:checked')).map(function(x){return x.value;});
@@ -700,6 +731,7 @@ function updateFilterLabels(){
   if(classLabel){
     classLabel.textContent = FILTERS.classes.length?('Classification ('+FILTERS.classes.length+')'):'Classification (all)';
   }
+  renderFilterChips();
 }
 
 function toggleFilterDD(kind){
@@ -717,6 +749,37 @@ function closeFilterDD(){
   if(mm) mm.classList.remove('open');
   if(cm) cm.classList.remove('open');
   activeFilterDD=null;
+}
+
+function renderFilterChips(){
+  var wrap=document.getElementById('filter-chips');
+  if(!wrap) return;
+  var chips=[];
+  if(FILTERS.makes.length){
+    FILTERS.makes.forEach(function(m){
+      chips.push('<span class="chip">Make: '+m+' <button onclick="removeFilterChip(\'make\',\''+m.replace(/'/g,"\\'")+'\')">x</button></span>');
+    });
+  }
+  if(FILTERS.classes.length){
+    FILTERS.classes.forEach(function(c){
+      chips.push('<span class="chip">Class: '+c+' <button onclick="removeFilterChip(\'class\',\''+c.replace(/'/g,"\\'")+'\')">x</button></span>');
+    });
+  }
+  wrap.innerHTML = chips.join('') || '';
+}
+
+function removeFilterChip(kind, val){
+  if(kind==='make'){
+    FILTERS.makes = FILTERS.makes.filter(function(x){return x!==val;});
+    var menu=document.getElementById('f-make-menu');
+    if(menu){ menu.querySelectorAll('input[type=checkbox]').forEach(function(cb){ if(cb.value===val) cb.checked=false; }); }
+  } else if(kind==='class'){
+    FILTERS.classes = FILTERS.classes.filter(function(x){return x!==val;});
+    var cm=document.getElementById('f-class-menu');
+    if(cm){ cm.querySelectorAll('input[type=checkbox]').forEach(function(cb){ if(cb.value===val) cb.checked=false; }); }
+  }
+  updateFilterLabels();
+  renderTable(); updateSelCount();
 }
 
 function wireRemarkInputs(){
@@ -804,7 +867,7 @@ function updateHeaderCheck(){
 }
 
 function enableButtons(){
-  ['btn-dl-sel','btn-dl-all','btn-dl-merged'].forEach(function(id){
+  ['btn-dl-sel','btn-dl-all','btn-dl-merged','btn-dl-filtered'].forEach(function(id){
     var b=document.getElementById(id);
     b.removeAttribute('data-off'); b.removeAttribute('disabled');
   });
@@ -910,6 +973,13 @@ function downloadSelected(mode){
   var visible=getVisibleRows();
   var rows=visible.filter(function(v){return v.row.checked;}).map(function(v){return v.row;});
   if(!rows.length){toast('No VINs selected','err');return;}
+  checkManualAndDownload(rows, mode);
+}
+
+function downloadFiltered(mode){
+  var visible=getVisibleRows();
+  var rows=visible.map(function(v){return v.row;});
+  if(!rows.length){toast('No VINs with current filters','err');return;}
   checkManualAndDownload(rows, mode);
 }
 function downloadAll(mode){

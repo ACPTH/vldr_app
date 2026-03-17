@@ -49,6 +49,7 @@ Env vars in Render:
 ## Performance tuning
 - `VLDR_MAX_JOBS` (default: 2) limits concurrent PDF generation to keep response times under ~10s on Render Free.
 - `VLDR_QUEUE_TIMEOUT` (default: 20s) lets requests wait briefly instead of failing with "Server busy".
+- `VLDR_CACHE_MAX` (default: 200) limits in-memory PDF cache size (per instance).
 
 ## Excel Formats Supported
 - Internal: sheet=damage_list, columns: vin, make, damage_part_code...
