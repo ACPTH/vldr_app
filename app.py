@@ -675,23 +675,24 @@ def generate():
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
     if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
-    try: tpl = get_template(fmt)
-    except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
-    vg = group_by_vin(data.get('records',[]))
-    target = data.get('vins',[]) or list(vg.keys())
     try:
-        buf = make_merged_pdf(fmt, target, vg, data.get('manual',{}))
-    except Exception as e:
-        return jsonify({'error':str(e)}), 500
-    if len(target) == 1:
-        safe_vin = target[0].replace('/', '_').replace('\\', '_')
-        fname = safe_vin + '.pdf'
-    else:
-        fname = 'VLDR_' + fmt + '_' + str(len(target)) + 'vins.pdf'
-    resp = send_file(buf, mimetype='application/pdf', as_attachment=True,
-                     download_name=fname)
-    _end_job(start_ts)
-    return resp
+        try: tpl = get_template(fmt)
+        except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
+        vg = group_by_vin(data.get('records',[]))
+        target = data.get('vins',[]) or list(vg.keys())
+        try:
+            buf = make_merged_pdf(fmt, target, vg, data.get('manual',{}))
+        except Exception as e:
+            return jsonify({'error':str(e)}), 500
+        if len(target) == 1:
+            safe_vin = target[0].replace('/', '_').replace('\\', '_')
+            fname = safe_vin + '.pdf'
+        else:
+            fname = 'VLDR_' + fmt + '_' + str(len(target)) + 'vins.pdf'
+        return send_file(buf, mimetype='application/pdf', as_attachment=True,
+                         download_name=fname)
+    finally:
+        _end_job(start_ts)
 
 @app.route('/api/generate-individual', methods=['POST'])
 def generate_individual():
@@ -702,18 +703,19 @@ def generate_individual():
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
     if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
-    try: get_template(fmt)
-    except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
-    vg = group_by_vin(data.get('records',[]))
-    target = data.get('vins',[]) or list(vg.keys())
     try:
-        buf = make_individual_zip(fmt, target, vg, data.get('manual',{}))
-    except Exception as e:
-        return jsonify({'error':str(e)}), 500
-    resp = send_file(buf, mimetype='application/zip', as_attachment=True,
-                     download_name='VLDR_'+fmt+'_individual_'+str(len(target))+'vins.zip')
-    _end_job(start_ts)
-    return resp
+        try: get_template(fmt)
+        except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
+        vg = group_by_vin(data.get('records',[]))
+        target = data.get('vins',[]) or list(vg.keys())
+        try:
+            buf = make_individual_zip(fmt, target, vg, data.get('manual',{}))
+        except Exception as e:
+            return jsonify({'error':str(e)}), 500
+        return send_file(buf, mimetype='application/zip', as_attachment=True,
+                         download_name='VLDR_'+fmt+'_individual_'+str(len(target))+'vins.zip')
+    finally:
+        _end_job(start_ts)
 
 @app.route('/api/generate-all', methods=['POST'])
 def generate_all():
@@ -724,20 +726,21 @@ def generate_all():
     target  = data.get('vins',[]) or list(vg.keys())
     if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for fmt in BUILDERS:
-            if not is_format_allowed(fmt): continue
-            try:
-                buf = make_merged_pdf(fmt, target, vg, manuals.get(fmt,{}))
-                zf.writestr('VLDR_'+fmt+'_'+str(len(target))+'vins.pdf', buf.read())  # format-level file, VIN inside
-            except Exception:
-                pass
-    zip_buf.seek(0)
-    resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
-                     download_name='VLDR_ALL_merged_'+str(len(target))+'vins.zip')
-    _end_job(start_ts)
-    return resp
+    try:
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for fmt in BUILDERS:
+                if not is_format_allowed(fmt): continue
+                try:
+                    buf = make_merged_pdf(fmt, target, vg, manuals.get(fmt,{}))
+                    zf.writestr('VLDR_'+fmt+'_'+str(len(target))+'vins.pdf', buf.read())  # format-level file, VIN inside
+                except Exception:
+                    pass
+        zip_buf.seek(0)
+        return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+                         download_name='VLDR_ALL_merged_'+str(len(target))+'vins.zip')
+    finally:
+        _end_job(start_ts)
 
 @app.route('/api/generate-all-individual', methods=['POST'])
 def generate_all_individual():
@@ -748,32 +751,33 @@ def generate_all_individual():
     target  = data.get('vins',[]) or list(vg.keys())
     if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for fmt in BUILDERS:
-            if not is_format_allowed(fmt): continue
-            try:
-                tpl = get_template(fmt)
-                fsz = FONT_SIZES.get(fmt,{})
-                manual = manuals.get(fmt,{})
-                comb_skip = comb_skip_for(fmt)
-                for vin in target:
-                    if vin not in vg: continue
-                    flat = fill_pdf_and_overlay_comb(
-                        tpl,
-                        BUILDERS[fmt](vin, vg[vin], manual),
-                        fsz,
-                        comb_skip=comb_skip
-                    )
-                    safe = vin.replace('/','_').replace('\\','_')
-                    zf.writestr(fmt+'/'+safe+'.pdf', flat.read())  # VIN.pdf only
-            except Exception:
-                pass
-    zip_buf.seek(0)
-    resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
-                     download_name='VLDR_ALL_individual_'+str(len(target))+'vins.zip')
-    _end_job(start_ts)
-    return resp
+    try:
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for fmt in BUILDERS:
+                if not is_format_allowed(fmt): continue
+                try:
+                    tpl = get_template(fmt)
+                    fsz = FONT_SIZES.get(fmt,{})
+                    manual = manuals.get(fmt,{})
+                    comb_skip = comb_skip_for(fmt)
+                    for vin in target:
+                        if vin not in vg: continue
+                        flat = fill_pdf_and_overlay_comb(
+                            tpl,
+                            BUILDERS[fmt](vin, vg[vin], manual),
+                            fsz,
+                            comb_skip=comb_skip
+                        )
+                        safe = vin.replace('/','_').replace('\\','_')
+                        zf.writestr(fmt+'/'+safe+'.pdf', flat.read())  # VIN.pdf only
+                except Exception:
+                    pass
+        zip_buf.seek(0)
+        return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+                         download_name='VLDR_ALL_individual_'+str(len(target))+'vins.zip')
+    finally:
+        _end_job(start_ts)
 
 
 @app.route('/api/preview', methods=['POST'])
@@ -801,12 +805,14 @@ def preview():
     if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
-        comb_skip = comb_skip_for(fmt)
-        flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, vg[vin], manual),
-                                         FONT_SIZES.get(fmt, {}), comb_skip=comb_skip)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    _end_job(start_ts)
+        try:
+            comb_skip = comb_skip_for(fmt)
+            flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, vg[vin], manual),
+                                             FONT_SIZES.get(fmt, {}), comb_skip=comb_skip)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    finally:
+        _end_job(start_ts)
 
     import base64
     b64 = base64.b64encode(flat.read()).decode('utf-8')
@@ -830,76 +836,78 @@ def generate_batch():
     if mode == 'individual':
         if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
         start_ts = time.time()
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for item in items:
-                fmt    = item.get('format', '').upper()
-                vin    = item.get('vin', '')
-                manual = item.get('manual', {})
-                if fmt not in BUILDERS or vin not in vg:
-                    continue
-                if not is_format_allowed(fmt):
-                    continue
-                try:
-                    tpl = get_template(fmt)
-                    fsz = FONT_SIZES.get(fmt, {})
-                    comb_skip = comb_skip_for(fmt)
-                    flat = fill_pdf_and_overlay_comb(
-                        tpl,
-                        BUILDERS[fmt](vin, vg[vin], manual),
-                        fsz,
-                        comb_skip=comb_skip
-                    )          # flatten = non-editable
-                    safe = vin.replace('/', '_').replace('\\', '_')
-                    zf.writestr(safe + '.pdf', flat.read()) # VIN.pdf only
-                except Exception:
-                    pass
-        zip_buf.seek(0)
-        total = len(items)
-        resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
-                         download_name='VLDR_selected_' + str(total) + 'vins.zip')
-        _end_job(start_ts)
-        return resp
+        try:
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for item in items:
+                    fmt    = item.get('format', '').upper()
+                    vin    = item.get('vin', '')
+                    manual = item.get('manual', {})
+                    if fmt not in BUILDERS or vin not in vg:
+                        continue
+                    if not is_format_allowed(fmt):
+                        continue
+                    try:
+                        tpl = get_template(fmt)
+                        fsz = FONT_SIZES.get(fmt, {})
+                        comb_skip = comb_skip_for(fmt)
+                        flat = fill_pdf_and_overlay_comb(
+                            tpl,
+                            BUILDERS[fmt](vin, vg[vin], manual),
+                            fsz,
+                            comb_skip=comb_skip
+                        )          # flatten = non-editable
+                        safe = vin.replace('/', '_').replace('\\', '_')
+                        zf.writestr(safe + '.pdf', flat.read()) # VIN.pdf only
+                    except Exception:
+                        pass
+            zip_buf.seek(0)
+            total = len(items)
+            return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+                             download_name='VLDR_selected_' + str(total) + 'vins.zip')
+        finally:
+            _end_job(start_ts)
 
     elif mode == 'all-merged':
         if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
         start_ts = time.time()
-        from collections import defaultdict
-        by_fmt = defaultdict(list)
-        manual_by_fmt = {}
-        for item in items:
-            fmt = item.get('format','').upper()
-            by_fmt[fmt].append(item.get('vin',''))
-            manual_by_fmt[fmt] = item.get('manual', {})
+        try:
+            from collections import defaultdict
+            by_fmt = defaultdict(list)
+            manual_by_fmt = {}
+            for item in items:
+                fmt = item.get('format','').upper()
+                by_fmt[fmt].append(item.get('vin',''))
+                manual_by_fmt[fmt] = item.get('manual', {})
 
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for fmt, vins in by_fmt.items():
-                if fmt not in BUILDERS: continue
-                if not is_format_allowed(fmt): continue
-                try:
-                    tpl = get_template(fmt)
-                    fsz = FONT_SIZES.get(fmt, {})
-                    merged = PdfWriter()
-                    comb_skip = comb_skip_for(fmt)
-                    for vin in vins:
-                        if vin not in vg: continue
-                        flat = fill_pdf_and_overlay_comb(
-                            tpl,
-                            BUILDERS[fmt](vin, vg[vin], manual_by_fmt.get(fmt,{})),
-                            fsz,
-                            comb_skip=comb_skip
-                        )
-                        merged.append(PdfReader(flat))
-                    pdf_out = io.BytesIO(); merged.write(pdf_out)
-                    zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.getvalue())
-                except Exception:
-                    pass
-        zip_buf.seek(0)
-        resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
-                         download_name='VLDR_all_formats.zip')
-        _end_job(start_ts)
-        return resp
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fmt, vins in by_fmt.items():
+                    if fmt not in BUILDERS: continue
+                    if not is_format_allowed(fmt): continue
+                    try:
+                        tpl = get_template(fmt)
+                        fsz = FONT_SIZES.get(fmt, {})
+                        merged = PdfWriter()
+                        comb_skip = comb_skip_for(fmt)
+                        for vin in vins:
+                            if vin not in vg: continue
+                            flat = fill_pdf_and_overlay_comb(
+                                tpl,
+                                BUILDERS[fmt](vin, vg[vin], manual_by_fmt.get(fmt,{})),
+                                fsz,
+                                comb_skip=comb_skip
+                            )
+                            merged.append(PdfReader(flat))
+                        pdf_out = io.BytesIO(); merged.write(pdf_out)
+                        zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.getvalue())
+                    except Exception:
+                        pass
+            zip_buf.seek(0)
+            return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+                             download_name='VLDR_all_formats.zip')
+        finally:
+            _end_job(start_ts)
 
     else:
         return jsonify({'error': 'Unknown mode'}), 400
