@@ -452,6 +452,7 @@ function buildRows(){
   ROWS=[];
   Object.keys(VIN_GROUPS).forEach(function(vin){
     var rs=VIN_GROUPS[vin], r0=rs[0];
+    if(!rs || rs.length===0) return; // skip VINs with zero damages
     var make=(r0.make&&r0.make!=='-')?r0.make:'';
     var detFmt=make?MAKE_FMT[make.toLowerCase()]:null;
     if(detFmt && FORMATS.indexOf(detFmt)===-1) detFmt=null;
