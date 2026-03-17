@@ -450,9 +450,10 @@ function buildVinGroups(){
 
 function buildRows(){
   ROWS=[];
+  var skipped=0;
   Object.keys(VIN_GROUPS).forEach(function(vin){
     var rs=VIN_GROUPS[vin], r0=rs[0];
-    if(!rs || rs.length===0) return; // skip VINs with zero damages
+    if(!rs || rs.length===0){ skipped++; return; } // skip VINs with zero damages
     var make=(r0.make&&r0.make!=='-')?r0.make:'';
     var detFmt=make?MAKE_FMT[make.toLowerCase()]:null;
     if(detFmt && FORMATS.indexOf(detFmt)===-1) detFmt=null;
@@ -473,6 +474,7 @@ function buildRows(){
   var unknown=Object.keys(makes).filter(function(m){return!MAKE_FMT[m.toLowerCase()];});
   var info='<strong>'+ROWS.length+'</strong> VINs loaded';
   if(unknown.length) info+=' &nbsp;|&nbsp; <span style="color:var(--amber)">Unknown makes: '+unknown.join(', ')+' (ECG default)</span>';
+  if(skipped) info+=' &nbsp;|&nbsp; <span style="color:var(--amber)">Skipped VINs: '+skipped+' (0 damages)</span>';
   document.getElementById('abar-info').innerHTML=info;
 }
 
