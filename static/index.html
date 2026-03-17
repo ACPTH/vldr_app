@@ -68,7 +68,7 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .filter-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .filter-inp{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;min-width:120px;outline:none}
 .filter-inp:focus{border-color:var(--accent)}
-.filter-sel{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;outline:none}
+.filter-sel{background:#f8fafc;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 8px;font-size:11px;outline:none;min-width:140px}
 .sort-th{cursor:pointer;user-select:none}
 .sort-th span{opacity:.6;font-size:9px;margin-left:4px}
 
@@ -220,9 +220,8 @@ iframe{width:100%;height:100%;border:none}
       <!-- Filters -->
       <div class="filter-wrap">
         <input class="filter-inp" id="f-vin" placeholder="Filter VIN">
-        <input class="filter-inp" id="f-make" placeholder="Filter Make">
-        <input class="filter-inp" id="f-model" placeholder="Filter Model">
-        <select class="filter-sel" id="f-format"><option value="">All formats</option></select>
+        <select class="filter-sel" id="f-make" multiple title="Filter Make (multi-select)"></select>
+        <select class="filter-sel" id="f-class" multiple title="Filter Classification (multi-select)"></select>
         <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
       </div>
 
@@ -241,10 +240,10 @@ iframe{width:100%;height:100%;border:none}
             <th class="sort-th" data-sort="model">Model <span id="sort-model"></span></th>
             <th class="sort-th" data-sort="damages">Damages <span id="sort-damages"></span></th>
             <th class="sort-th" data-sort="format">Format <span id="sort-format"></span></th>
-            <th>Part</th>
-            <th>Type</th>
-            <th>Extent</th>
-            <th>Classification</th>
+            <th class="sort-th" data-sort="part">Part <span id="sort-part"></span></th>
+            <th class="sort-th" data-sort="type">Type <span id="sort-type"></span></th>
+            <th class="sort-th" data-sort="extent">Extent <span id="sort-extent"></span></th>
+            <th class="sort-th" data-sort="classification">Classification <span id="sort-classification"></span></th>
             <th class="sort-th" data-sort="remark">Remark <span id="sort-remark"></span></th>
             <th>Actions</th>
           </tr>
@@ -327,7 +326,7 @@ var CLS_MAP = {
 var RECORDS=[], VIN_GROUPS={};
 var ROWS=[];          // [{vin, make, model, format, isAuto, records, checked, manual}]
 var serverOK=false, templateStatus={}, allManualFields={};
-var FILTERS={vin:'',make:'',model:'',format:''};
+var FILTERS={vin:'',makes:[],classes:[]};
 var SORT={key:'vin',dir:1}; // dir: 1 asc, -1 desc
 var activeFmtDD=null; // row index with open fmt dropdown
 var pendingAction=null;
@@ -352,7 +351,7 @@ fetch('/api/auth/me').then(function(r){
     if(u.role==='admin') document.getElementById('admin-link').style.display='inline';
     ALLOWED_FORMATS = u.allowed_formats || null;
     applyAllowedFormats();
-    updateFormatFilterOptions();
+    updateFilterOptions();
   }).catch(function(){ window.location.href='/login'; });
 
 function applyAllowedFormats(){
@@ -466,7 +465,7 @@ function buildRows(){
     });
   });
   updateSelCount();
-  updateFormatFilterOptions();
+  updateFilterOptions();
   // Update action bar info
   var makes={};
   ROWS.forEach(function(r){if(r.make)makes[r.make]=true;});
@@ -524,30 +523,47 @@ function renderTable(){
   updateHeaderCheck();
 }
 
-function updateFormatFilterOptions(){
-  var sel=document.getElementById('f-format');
-  if(!sel) return;
-  var current=sel.value||'';
-  var opts=['<option value=\"\">All formats</option>'];
-  FORMATS.forEach(function(f){
-    opts.push('<option value=\"'+f+'\">'+f+'</option>');
-  });
-  sel.innerHTML=opts.join('');
-  if(current) sel.value=current;
+function updateFilterOptions(){
+  var makeSel=document.getElementById('f-make');
+  var classSel=document.getElementById('f-class');
+  if(makeSel){
+    var makes={};
+    ROWS.forEach(function(r){ if(r.make) makes[r.make]=true; });
+    var optsM=[];
+    Object.keys(makes).sort().forEach(function(m){
+      optsM.push('<option value=\"'+m+'\">'+m+'</option>');
+    });
+    makeSel.innerHTML=optsM.join('');
+  }
+  if(classSel){
+    var classes={};
+    ROWS.forEach(function(r){
+      r.records.forEach(function(x){ if(x.damage_classification) classes[x.damage_classification]=true; });
+    });
+    var optsC=[];
+    Object.keys(classes).sort().forEach(function(c){
+      optsC.push('<option value=\"'+c+'\">'+c+'</option>');
+    });
+    classSel.innerHTML=optsC.join('');
+  }
 }
 
 function getVisibleRows(){
   var list=[];
   var fvin=(FILTERS.vin||'').toLowerCase();
-  var fmake=(FILTERS.make||'').toLowerCase();
-  var fmodel=(FILTERS.model||'').toLowerCase();
-  var fformat=(FILTERS.format||'').toUpperCase();
+  var fmakes=FILTERS.makes||[];
+  var fclasses=FILTERS.classes||[];
   for(var i=0;i<ROWS.length;i++){
     var r=ROWS[i];
     if(fvin && String(r.vin||'').toLowerCase().indexOf(fvin)<0) continue;
-    if(fmake && String(r.make||'').toLowerCase().indexOf(fmake)<0) continue;
-    if(fmodel && String(r.model||'').toLowerCase().indexOf(fmodel)<0) continue;
-    if(fformat && String(r.format||'').toUpperCase()!==fformat) continue;
+    if(fmakes.length && fmakes.indexOf(r.make)<0) continue;
+    if(fclasses.length){
+      var has=false;
+      for(var j=0;j<r.records.length;j++){
+        if(fclasses.indexOf(r.records[j].damage_classification)>=0){has=true;break;}
+      }
+      if(!has) continue;
+    }
     list.push({idx:i,row:r});
   }
   list.sort(function(a,b){
@@ -557,6 +573,10 @@ function getVisibleRows(){
     else if(SORT.key==='model'){va=ka.model||''; vb=kb.model||'';}
     else if(SORT.key==='damages'){va=ka.records.length; vb=kb.records.length;}
     else if(SORT.key==='format'){va=ka.format||''; vb=kb.format||'';}
+    else if(SORT.key==='part'){va=ka.records.map(function(x){return x.damage_part_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_part_code||'';}).join(' ');}
+    else if(SORT.key==='type'){va=ka.records.map(function(x){return x.damage_type_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_type_code||'';}).join(' ');}
+    else if(SORT.key==='extent'){va=ka.records.map(function(x){return x.damage_extent_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_extent_code||'';}).join(' ');}
+    else if(SORT.key==='classification'){va=ka.records.map(function(x){return x.damage_classification||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_classification||'';}).join(' ');}
     else if(SORT.key==='remark'){va=ka.remark||''; vb=kb.remark||'';}
     if(typeof va==='string') va=va.toLowerCase();
     if(typeof vb==='string') vb=vb.toLowerCase();
@@ -568,7 +588,7 @@ function getVisibleRows(){
 }
 
 function updateSortIndicators(){
-  var keys=['vin','make','model','damages','format','remark'];
+  var keys=['vin','make','model','damages','format','part','type','extent','classification','remark'];
   keys.forEach(function(k){
     var el=document.getElementById('sort-'+k);
     if(!el) return;
@@ -593,24 +613,26 @@ function bindSorting(){
 function bindFilters(){
   var vin=document.getElementById('f-vin');
   var make=document.getElementById('f-make');
-  var model=document.getElementById('f-model');
-  var format=document.getElementById('f-format');
+  var clas=document.getElementById('f-class');
   if(vin) vin.addEventListener('input', function(){FILTERS.vin=vin.value; renderTable(); updateSelCount();});
-  if(make) make.addEventListener('input', function(){FILTERS.make=make.value; renderTable(); updateSelCount();});
-  if(model) model.addEventListener('input', function(){FILTERS.model=model.value; renderTable(); updateSelCount();});
-  if(format) format.addEventListener('change', function(){FILTERS.format=format.value; renderTable(); updateSelCount();});
+  if(make) make.addEventListener('change', function(){
+    FILTERS.makes=Array.from(make.selectedOptions).map(function(o){return o.value;});
+    renderTable(); updateSelCount();
+  });
+  if(clas) clas.addEventListener('change', function(){
+    FILTERS.classes=Array.from(clas.selectedOptions).map(function(o){return o.value;});
+    renderTable(); updateSelCount();
+  });
 }
 
 function clearFilters(){
-  FILTERS={vin:'',make:'',model:'',format:''};
+  FILTERS={vin:'',makes:[],classes:[]};
   var vin=document.getElementById('f-vin');
   var make=document.getElementById('f-make');
-  var model=document.getElementById('f-model');
-  var format=document.getElementById('f-format');
+  var clas=document.getElementById('f-class');
   if(vin) vin.value='';
-  if(make) make.value='';
-  if(model) model.value='';
-  if(format) format.value='';
+  if(make) Array.from(make.options).forEach(function(o){o.selected=false;});
+  if(clas) Array.from(clas.options).forEach(function(o){o.selected=false;});
   renderTable();
   updateSelCount();
 }
