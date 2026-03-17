@@ -38,6 +38,14 @@ python app.py
 Notes:
 - The app stores users in the file set by `VLDR_DB_PATH` (Render sets to /var/data/users.db in render.yaml).
 
+## Supabase (Postgres) for Render Free
+
+If you deploy on Render Free (no Disk), use Supabase Postgres and set `DATABASE_URL`.
+
+Env vars in Render:
+- SECRET_KEY (Generate)
+- DATABASE_URL (Supabase connection string)
+
 ## Excel Formats Supported
 - Internal: sheet=damage_list, columns: vin, make, damage_part_code...
 - Report: sheet=damage_list, columns: vehicle_vin, vehicle_make, transport_date...
