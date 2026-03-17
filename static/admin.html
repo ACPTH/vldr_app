@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLDR — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--blue:#1B4F8A;--red:#c0392b;--green:#1B7A3E;--border:#d0d8e6;--bg:#f0f4f8;--surf:#fff;--text:#1a2332;--text2:#4a5a72}
+body{background:var(--bg);font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text)}
+.topbar{background:var(--blue);height:48px;display:flex;align-items:center;padding:0 24px;gap:12px}
+.topbar img{height:32px;filter:brightness(0) invert(1)}
+.topbar-title{color:#fff;font-weight:600;font-size:13px;flex:1}
+.topbar a{color:rgba(255,255,255,.75);font-size:11px;text-decoration:none}.topbar a:hover{color:#fff}
+.content{max-width:720px;margin:32px auto;padding:0 16px;display:flex;flex-direction:column;gap:20px}
+.card{background:var(--surf);border-radius:10px;border:1px solid var(--border);overflow:hidden;box-shadow:0 1px 4px rgba(27,79,138,.06)}
+.card-hdr{background:var(--blue);padding:12px 18px;color:#fff;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+.card-bdy{padding:18px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#f0f4f8;padding:7px 10px;font-size:9px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.08em;text-align:left;border-bottom:1px solid var(--border)}
+td{padding:8px 10px;border-bottom:1px solid #eef1f6;vertical-align:middle}
+tr:last-child td{border:none}
+.badge{font-size:9px;font-weight:600;padding:2px 6px;border-radius:3px}
+.badge-admin{background:rgba(27,79,138,.1);color:var(--blue)}
+.badge-user{background:#eef1f6;color:var(--text2)}
+.badge-on{background:rgba(27,122,62,.1);color:var(--green)}
+.badge-off{background:rgba(192,57,43,.1);color:var(--red)}
+.btn{display:inline-flex;align-items:center;padding:5px 10px;border-radius:5px;font-size:10px;font-weight:600;border:none;cursor:pointer;font-family:inherit;transition:all .12s}
+.btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:#1a5fa8}
+.btn-danger{background:rgba(192,57,43,.1);color:var(--red);border:1px solid rgba(192,57,43,.2)}.btn-danger:hover{background:rgba(192,57,43,.2)}
+.btn-sm{padding:4px 8px;font-size:10px}
+.form-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px}
+.field label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em}
+.field input,.field select{background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--text);outline:none;font-family:inherit}
+.field input:focus,.field select:focus{border-color:var(--blue)}
+.fmt-list{display:flex;flex-wrap:wrap;gap:6px;background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:6px}
+.fmt-chip{display:flex;align-items:center;gap:4px;font-size:10px;background:#fff;border:1px solid var(--border);border-radius:4px;padding:4px 6px}
+.fmt-chip input{width:12px;height:12px}
+.fmt-cell{display:flex;flex-wrap:wrap;gap:6px}
+.fmt-note{font-size:9px;color:#8a9ab8}
+.msg{padding:8px 12px;border-radius:6px;font-size:11px;display:none}
+.msg.ok{background:#eaf7ee;color:var(--green);border:1px solid #a8d5b5;display:block}
+.msg.err{background:#fdf0ee;color:var(--red);border:1px solid #e8b4ae;display:block}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <img id="logo" src="" alt="">
+  <span class="topbar-title">Admin Panel — VLDR Generator</span>
+  <a href="/">Back to App</a>
+  &nbsp;|&nbsp;
+  <a href="/api/auth/logout" onclick="event.preventDefault();doLogout()">Logout</a>
+</div>
+
+<div class="content">
+  <div class="card">
+    <div class="card-hdr">Create New User</div>
+    <div class="card-bdy">
+      <div id="create-msg" class="msg"></div>
+      <div class="form-row" style="margin-top:8px">
+        <div class="field"><label>Username</label><input type="text" id="new-usr" placeholder="username"></div>
+        <div class="field"><label>Password</label><input type="password" id="new-pwd" placeholder="min 6 chars"></div>
+        <div class="field" style="min-width:100px;max-width:120px">
+          <label>Role</label>
+          <select id="new-role"><option value="user">User</option><option value="admin">Admin</option></select>
+        </div>
+        <div class="field" style="flex:2;min-width:220px">
+          <label>Formats</label>
+          <div class="fmt-list" id="fmt-list"></div>
+        </div>
+        <div class="field" style="min-width:80px;max-width:100px;justify-content:flex-end">
+          <button class="btn btn-primary" onclick="createUser()">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-hdr">Users</div>
+    <div class="card-bdy" style="padding:0">
+      <table>
+        <thead>
+          <tr><th>Username</th><th>Role</th><th>Status</th><th>Formats</th><th>Created</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+fetch('/api/logo').then(function(r){return r.json();}).then(function(d){if(d.logo)document.getElementById('logo').src=d.logo;}).catch(function(){});
+var CURRENT_UID = null;
+var FORMATS = ['BMW','ECG','FCA','FORD','LINKCO','RENAULT','STELLANTIS','VGED','VOLVO'];
+
+function initFormatCheckboxes(){
+  var html='';
+  html+='<label class="fmt-chip"><input type="checkbox" id="fmt-all" checked>All</label>';
+  FORMATS.forEach(function(f){
+    html+='<label class="fmt-chip"><input type="checkbox" class="fmt-cb" value="'+f+'" checked>'+f+'</label>';
+  });
+  document.getElementById('fmt-list').innerHTML=html;
+  document.getElementById('fmt-all').addEventListener('change', function(e){
+    var on=e.target.checked;
+    var cbs=document.querySelectorAll('.fmt-cb');
+    for(var i=0;i<cbs.length;i++) cbs[i].checked=on;
+  });
+}
+
+function getSelectedFormats(){
+  var cbs=document.querySelectorAll('.fmt-cb');
+  var list=[];
+  for(var i=0;i<cbs.length;i++){ if(cbs[i].checked) list.push(cbs[i].value); }
+  if(list.length===FORMATS.length) return '*';
+  return list;
+}
+
+function formatsLabel(list){
+  if(!list || !list.length) return 'All';
+  return list.join(', ');
+}
+
+function loadUsers(){
+  fetch('/api/admin/users').then(function(r){
+    if(r.status===403){window.location.href='/';return;}
+    return r.json();
+  }).then(function(users){
+    if(!users) return;
+    var html='';
+    users.forEach(function(u){
+      var fmtLabel=formatsLabel(u.allowed_formats);
+      var isSelf = (CURRENT_UID && u.id===CURRENT_UID);
+      html+='<tr>'
+        +'<td><strong>'+u.username+'</strong></td>'
+        +'<td><span class="badge badge-'+(u.role==='admin'?'admin':'user')+'">'+u.role+'</span></td>'
+        +'<td><span class="badge badge-'+(u.active?'on':'off')+'">'+(u.active?'Active':'Disabled')+'</span></td>'
+        +'<td>'+formatCell(u, isSelf)+'</td>'
+        +'<td style="color:#8a9ab8">'+u.created.slice(0,10)+'</td>'
+        +'<td style="display:flex;gap:6px;flex-wrap:wrap">'
+          +'<button class="btn btn-sm" style="background:#eef4fc;color:#1B4F8A;border:1px solid #7aaad8" onclick="resetPwd('+u.id+',\''+u.username+'\')">Reset pwd</button>'
+          +(u.active
+            ?'<button class="btn btn-danger btn-sm" onclick="toggleUser('+u.id+',false)">Disable</button>'
+            :'<button class="btn btn-sm" style="background:#eaf7ee;color:#1B7A3E;border:1px solid #a8d5b5" onclick="toggleUser('+u.id+',true)">Enable</button>')
+          +(u.username!=='admin'?'<button class="btn btn-danger btn-sm" onclick="deleteUser('+u.id+')">Delete</button>':'')
+        +'</td>'
+      +'</tr>';
+    });
+    document.getElementById('users-tbody').innerHTML=html;
+    wireFormatRows();
+  });
+}
+
+function createUser(){
+  var usr=document.getElementById('new-usr').value.trim();
+  var pwd=document.getElementById('new-pwd').value;
+  var role=document.getElementById('new-role').value;
+  var formats=getSelectedFormats();
+  fetch('/api/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:usr,password:pwd,role:role,allowed_formats:formats})})
+  .then(function(r){return r.json();}).then(function(d){
+    showMsg('create-msg', d.ok, d.message||d.error);
+    if(d.ok){document.getElementById('new-usr').value='';document.getElementById('new-pwd').value='';loadUsers();}
+  });
+}
+
+function resetPwd(uid, username){
+  var pwd=prompt('New password for '+username+' (min 6 chars):');
+  if(!pwd) return;
+  fetch('/api/admin/users/'+uid,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({password:pwd})})
+  .then(function(r){return r.json();}).then(function(d){alert(d.message||d.error);});
+}
+
+function toggleUser(uid, active){
+  fetch('/api/admin/users/'+uid,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({active:active})})
+  .then(function(r){return r.json();}).then(function(){loadUsers();});
+}
+
+function deleteUser(uid){
+  if(!confirm('Delete this user?')) return;
+  fetch('/api/admin/users/'+uid,{method:'DELETE'}).then(function(){loadUsers();});
+}
+
+function showMsg(id, ok, msg){
+  var el=document.getElementById(id);
+  el.className='msg '+(ok?'ok':'err');
+  el.textContent=msg;
+  setTimeout(function(){el.className='msg';},4000);
+}
+
+function doLogout(){
+  fetch('/api/auth/logout',{method:'POST'}).then(function(){window.location.href='/login';});
+}
+
+function formatCell(u, isSelf){
+  var all = (!u.allowed_formats || !u.allowed_formats.length);
+  var disabled = (isSelf && u.role==='admin') ? ' disabled' : '';
+  var html='<div class="fmt-cell" data-uid="'+u.id+'" data-self="'+(isSelf?'1':'0')+'">';
+  html+='<label class="fmt-chip"><input type="checkbox" class="fmt-all"'+(all?' checked':'')+disabled+'>All</label>';
+  for(var i=0;i<FORMATS.length;i++){
+    var f=FORMATS[i];
+    var checked = all || (u.allowed_formats && u.allowed_formats.indexOf(f)>=0);
+    html+='<label class="fmt-chip"><input type="checkbox" class="fmt-cb" value="'+f+'"'+(checked?' checked':'')+disabled+'>'+f+'</label>';
+  }
+  if(disabled) html+='<span class="fmt-note">Self admin locked</span>';
+  html+='</div>';
+  html+='<div style="margin-top:6px"><button class="btn btn-sm btn-primary fmt-save" data-uid="'+u.id+'"'+disabled+'>Save</button></div>';
+  return html;
+}
+
+function wireFormatRows(){
+  var rows=document.querySelectorAll('.fmt-cell');
+  rows.forEach(function(row){
+    var all=row.querySelector('.fmt-all');
+    var cbs=row.querySelectorAll('.fmt-cb');
+    if(all){
+      all.addEventListener('change', function(){
+        cbs.forEach(function(cb){cb.checked=all.checked;});
+      });
+    }
+  });
+  var saves=document.querySelectorAll('.fmt-save');
+  saves.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var uid=btn.getAttribute('data-uid');
+      var cell=document.querySelector('.fmt-cell[data-uid="'+uid+'"]');
+      if(!cell) return;
+      var isSelf = cell.getAttribute('data-self')==='1';
+      if(isSelf){alert('You cannot change your own format access.');return;}
+      var cbs=cell.querySelectorAll('.fmt-cb');
+      var list=[];
+      cbs.forEach(function(cb){ if(cb.checked) list.push(cb.value); });
+      var payload = (list.length===FORMATS.length) ? '*' : list;
+      fetch('/api/admin/users/'+uid,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({allowed_formats:payload})})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d && d.ok===false) alert(d.error||'Update failed');
+        loadUsers();
+      });
+    });
+  });
+}
+
+fetch('/api/auth/me').then(function(r){return r.json();}).then(function(u){
+  if(u && u.uid) CURRENT_UID=u.uid;
+  loadUsers();
+});
+initFormatCheckboxes();
+</script>
+</body>
+</html>

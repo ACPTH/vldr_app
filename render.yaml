@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: vldr-generator
+    runtime: docker
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: VLDR_DB_PATH
+        value: /var/data/users.db
+    disk:
+      name: vldr-data
+      mountPath: /var/data
+      sizeGB: 1

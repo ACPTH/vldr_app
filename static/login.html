@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLDR Generator — Login</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0f4f8;font-family:'DM Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(27,79,138,.12);width:380px;overflow:hidden}
+.card-header{background:#1B4F8A;padding:28px 32px 24px;text-align:center}
+.card-header img{height:44px;width:auto;filter:brightness(0) invert(1);margin-bottom:14px;display:block;margin-left:auto;margin-right:auto}
+.card-header h1{color:#fff;font-size:18px;font-weight:600;letter-spacing:.01em}
+.card-header p{color:rgba(255,255,255,.65);font-size:12px;margin-top:4px}
+.card-body{padding:28px 32px 32px;display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:11px;font-weight:600;color:#4a5a72;text-transform:uppercase;letter-spacing:.06em}
+.field input{background:#f8fafc;border:1px solid #d0d8e6;border-radius:7px;padding:10px 12px;font-size:13px;color:#1a2332;outline:none;transition:border-color .15s;font-family:inherit}
+.field input:focus{border-color:#1B4F8A;background:#fff}
+.btn-login{background:#1B4F8A;color:#fff;border:none;border-radius:7px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;font-family:inherit;margin-top:4px}
+.btn-login:hover{background:#1a5fa8}
+.error{background:#fdf0ee;border:1px solid #e8b4ae;border-radius:6px;padding:9px 12px;font-size:12px;color:#c0392b;display:none}
+.error.show{display:block}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <img id="logo" src="" alt="Logo">
+    <h1>VLDR Generator</h1>
+    <p>Vehicle Loss &amp; Damage Report</p>
+  </div>
+  <div class="card-body">
+    <div class="error" id="err"></div>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="usr" placeholder="Enter username" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="pwd" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="btn-login" onclick="doLogin()">Sign in</button>
+  </div>
+</div>
+<script>
+// Load logo
+fetch('/api/logo').then(function(r){return r.json();}).then(function(d){
+  if(d.logo) document.getElementById('logo').src=d.logo;
+}).catch(function(){});
+
+function doLogin(){
+  var usr=document.getElementById('usr').value.trim();
+  var pwd=document.getElementById('pwd').value;
+  var err=document.getElementById('err');
+  if(!usr||!pwd){showErr('Enter username and password');return;}
+  fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:usr,password:pwd})})
+  .then(function(r){return r.json();})
+  .then(function(d){
+    if(d.ok){window.location.href='/';}
+    else{showErr(d.error||'Login failed');}
+  }).catch(function(){showErr('Server not responding');});
+}
+function showErr(msg){
+  var e=document.getElementById('err');
+  e.textContent=msg; e.classList.add('show');
+  setTimeout(function(){e.classList.remove('show');},4000);
+}
+</script>
+</body>
+</html>
