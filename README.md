@@ -46,6 +46,9 @@ Env vars in Render:
 - SECRET_KEY (Generate)
 - DATABASE_URL (Supabase connection string)
 
+## Performance tuning
+- `VLDR_MAX_JOBS` (default: 2) limits concurrent PDF generation to keep response times under ~10s on Render Free.
+
 ## Excel Formats Supported
 - Internal: sheet=damage_list, columns: vin, make, damage_part_code...
 - Report: sheet=damage_list, columns: vehicle_vin, vehicle_make, transport_date...

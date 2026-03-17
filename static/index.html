@@ -571,9 +571,13 @@ function previewVinRow(idx){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({format:row.format,vin:row.vin,records:RECORDS,manual:row.manual||{}})
   })
-  .then(function(r){return r.json();})
+  .then(function(r){return r.json().then(function(d){d._status=r.status;return d;});})
   .then(function(d){
-    if(d.error){toast('Preview error: '+d.error,'err');closePreview();return;}
+    if(d.error){
+      if(d._status===429) toast('Server busy — please wait and try again','err');
+      else toast('Preview error: '+d.error,'err');
+      closePreview();return;
+    }
     var bytes=atob(d.pdf_b64);
     var arr=new Uint8Array(bytes.length);
     for(var i=0;i<bytes.length;i++) arr[i]=bytes.charCodeAt(i);
@@ -637,6 +641,7 @@ function doSinglePDF(row){
   .catch(function(e){
     pt.classList.add('hidden');
     var msg = e.message||'Unknown error';
+    if(msg.indexOf('Server busy')>=0){toast('Server busy — wait a few seconds','err');return;}
     if(msg.indexOf('fetch')>=0||msg.indexOf('network')>=0||msg.toLowerCase().indexOf('failed')>=0){
       msg = 'Connection error — is python app.py running? Is pdftk installed?';
     }
@@ -766,6 +771,7 @@ function doDownload(rows, mode){
   .catch(function(e){
     pt.classList.add('hidden');
     var msg = e.message||'Unknown error';
+    if(msg.indexOf('Server busy')>=0){toast('Server busy — wait a few seconds','err');return;}
     if(msg.indexOf('fetch')>=0||msg.indexOf('network')>=0||msg.toLowerCase().indexOf('failed')>=0){
       msg = 'Connection error — is python app.py running? Is pdftk installed?';
     }

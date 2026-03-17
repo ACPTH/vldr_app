@@ -3,7 +3,8 @@ VLDR Generator - Flask Backend
 Run: python app.py  |  Open: http://localhost:5050
 Place PDF templates in ./templates/ folder (same directory as app.py)
 """
-import os, io, zipfile, json, base64
+import os, io, zipfile, json, base64, time, threading
+from collections import deque
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
 from pypdf import PdfReader, PdfWriter
@@ -20,6 +21,33 @@ BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 STATIC_DIR   = os.path.join(BASE_DIR, 'static')
 
+# Concurrency control (Render free is tight)
+MAX_JOBS = int(os.environ.get('VLDR_MAX_JOBS', '2'))
+_job_sem = threading.BoundedSemaphore(MAX_JOBS)
+_job_lock = threading.Lock()
+_active_jobs = 0
+_recent_times = deque(maxlen=30)
+
+def _try_start_job():
+    global _active_jobs
+    if not _job_sem.acquire(blocking=False):
+        return False
+    with _job_lock:
+        _active_jobs += 1
+    return True
+
+def _end_job(start_ts):
+    global _active_jobs
+    with _job_lock:
+        _active_jobs = max(0, _active_jobs - 1)
+    _job_sem.release()
+    _recent_times.append(time.time() - start_ts)
+
+def _job_stats():
+    with _job_lock:
+        active = _active_jobs
+    avg = sum(_recent_times) / len(_recent_times) if _recent_times else 0
+    return {'active': active, 'max': MAX_JOBS, 'avg_sec': round(avg, 2)}
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
 from auth import login_required, admin_required, get_all_users, create_user, update_user, delete_user
@@ -502,6 +530,10 @@ def list_templates():
     return jsonify({fmt: os.path.exists(os.path.join(TEMPLATE_DIR, fname))
                     for fmt, fname in TEMPLATE_FILES.items()})
 
+@app.route('/api/server-status')
+def server_status():
+    return jsonify(_job_stats())
+
 @app.route('/api/manual-fields/<fmt>')
 def get_manual_fields(fmt):
     fields = MANUAL_FIELDS.get(fmt.upper(), [])
@@ -641,6 +673,8 @@ def generate():
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS: return jsonify({'error':'Unknown format: '+fmt}), 400
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
+    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    start_ts = time.time()
     try: tpl = get_template(fmt)
     except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
     vg = group_by_vin(data.get('records',[]))
@@ -654,8 +688,10 @@ def generate():
         fname = safe_vin + '.pdf'
     else:
         fname = 'VLDR_' + fmt + '_' + str(len(target)) + 'vins.pdf'
-    return send_file(buf, mimetype='application/pdf', as_attachment=True,
+    resp = send_file(buf, mimetype='application/pdf', as_attachment=True,
                      download_name=fname)
+    _end_job(start_ts)
+    return resp
 
 @app.route('/api/generate-individual', methods=['POST'])
 def generate_individual():
@@ -664,6 +700,8 @@ def generate_individual():
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS: return jsonify({'error':'Unknown format: '+fmt}), 400
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
+    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    start_ts = time.time()
     try: get_template(fmt)
     except FileNotFoundError as e: return jsonify({'error':str(e)}), 404
     vg = group_by_vin(data.get('records',[]))
@@ -672,8 +710,10 @@ def generate_individual():
         buf = make_individual_zip(fmt, target, vg, data.get('manual',{}))
     except Exception as e:
         return jsonify({'error':str(e)}), 500
-    return send_file(buf, mimetype='application/zip', as_attachment=True,
+    resp = send_file(buf, mimetype='application/zip', as_attachment=True,
                      download_name='VLDR_'+fmt+'_individual_'+str(len(target))+'vins.zip')
+    _end_job(start_ts)
+    return resp
 
 @app.route('/api/generate-all', methods=['POST'])
 def generate_all():
@@ -682,6 +722,8 @@ def generate_all():
     manuals = data.get('manuals', {})
     vg      = group_by_vin(data.get('records',[]))
     target  = data.get('vins',[]) or list(vg.keys())
+    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    start_ts = time.time()
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for fmt in BUILDERS:
@@ -692,8 +734,10 @@ def generate_all():
             except Exception:
                 pass
     zip_buf.seek(0)
-    return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+    resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
                      download_name='VLDR_ALL_merged_'+str(len(target))+'vins.zip')
+    _end_job(start_ts)
+    return resp
 
 @app.route('/api/generate-all-individual', methods=['POST'])
 def generate_all_individual():
@@ -702,6 +746,8 @@ def generate_all_individual():
     manuals = data.get('manuals', {})
     vg      = group_by_vin(data.get('records',[]))
     target  = data.get('vins',[]) or list(vg.keys())
+    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    start_ts = time.time()
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for fmt in BUILDERS:
@@ -724,8 +770,10 @@ def generate_all_individual():
             except Exception:
                 pass
     zip_buf.seek(0)
-    return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+    resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
                      download_name='VLDR_ALL_individual_'+str(len(target))+'vins.zip')
+    _end_job(start_ts)
+    return resp
 
 
 @app.route('/api/preview', methods=['POST'])
@@ -750,12 +798,15 @@ def preview():
     if vin not in vg:
         return jsonify({'error': 'VIN not found: ' + vin}), 404
 
+    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    start_ts = time.time()
     try:
         comb_skip = comb_skip_for(fmt)
         flat = fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, vg[vin], manual),
                                          FONT_SIZES.get(fmt, {}), comb_skip=comb_skip)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    _end_job(start_ts)
 
     import base64
     b64 = base64.b64encode(flat.read()).decode('utf-8')
@@ -777,6 +828,8 @@ def generate_batch():
     vg     = group_by_vin(recs)
 
     if mode == 'individual':
+        if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+        start_ts = time.time()
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
             for item in items:
@@ -803,10 +856,14 @@ def generate_batch():
                     pass
         zip_buf.seek(0)
         total = len(items)
-        return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+        resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
                          download_name='VLDR_selected_' + str(total) + 'vins.zip')
+        _end_job(start_ts)
+        return resp
 
     elif mode == 'all-merged':
+        if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+        start_ts = time.time()
         from collections import defaultdict
         by_fmt = defaultdict(list)
         manual_by_fmt = {}
@@ -839,8 +896,10 @@ def generate_batch():
                 except Exception:
                     pass
         zip_buf.seek(0)
-        return send_file(zip_buf, mimetype='application/zip', as_attachment=True,
+        resp = send_file(zip_buf, mimetype='application/zip', as_attachment=True,
                          download_name='VLDR_all_formats.zip')
+        _end_job(start_ts)
+        return resp
 
     else:
         return jsonify({'error': 'Unknown mode'}), 400
