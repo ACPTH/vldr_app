@@ -23,18 +23,26 @@ STATIC_DIR   = os.path.join(BASE_DIR, 'static')
 
 # Concurrency control (Render free is tight)
 MAX_JOBS = int(os.environ.get('VLDR_MAX_JOBS', '2'))
+QUEUE_TIMEOUT = float(os.environ.get('VLDR_QUEUE_TIMEOUT', '20'))  # seconds to wait in queue
 _job_sem = threading.BoundedSemaphore(MAX_JOBS)
 _job_lock = threading.Lock()
 _active_jobs = 0
+_queued_jobs = 0
 _recent_times = deque(maxlen=30)
 
-def _try_start_job():
-    global _active_jobs
-    if not _job_sem.acquire(blocking=False):
-        return False
+def _start_job_or_queue():
+    """Acquire a job slot. Wait up to QUEUE_TIMEOUT. Returns (ok, waited_sec)."""
+    global _active_jobs, _queued_jobs
+    start_wait = time.time()
     with _job_lock:
-        _active_jobs += 1
-    return True
+        _queued_jobs += 1
+    acquired = _job_sem.acquire(timeout=QUEUE_TIMEOUT)
+    waited = time.time() - start_wait
+    with _job_lock:
+        _queued_jobs = max(0, _queued_jobs - 1)
+        if acquired:
+            _active_jobs += 1
+    return acquired, waited
 
 def _end_job(start_ts):
     global _active_jobs
@@ -46,8 +54,9 @@ def _end_job(start_ts):
 def _job_stats():
     with _job_lock:
         active = _active_jobs
+        queued = _queued_jobs
     avg = sum(_recent_times) / len(_recent_times) if _recent_times else 0
-    return {'active': active, 'max': MAX_JOBS, 'avg_sec': round(avg, 2)}
+    return {'active': active, 'queued': queued, 'max': MAX_JOBS, 'avg_sec': round(avg, 2)}
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
 from auth import login_required, admin_required, get_all_users, create_user, update_user, delete_user
@@ -673,7 +682,8 @@ def generate():
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS: return jsonify({'error':'Unknown format: '+fmt}), 400
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
-    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    ok, waited = _start_job_or_queue()
+    if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
         try: tpl = get_template(fmt)
@@ -701,7 +711,8 @@ def generate_individual():
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS: return jsonify({'error':'Unknown format: '+fmt}), 400
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
-    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    ok, waited = _start_job_or_queue()
+    if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
         try: get_template(fmt)
@@ -724,7 +735,8 @@ def generate_all():
     manuals = data.get('manuals', {})
     vg      = group_by_vin(data.get('records',[]))
     target  = data.get('vins',[]) or list(vg.keys())
-    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    ok, waited = _start_job_or_queue()
+    if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
         zip_buf = io.BytesIO()
@@ -749,7 +761,8 @@ def generate_all_individual():
     manuals = data.get('manuals', {})
     vg      = group_by_vin(data.get('records',[]))
     target  = data.get('vins',[]) or list(vg.keys())
-    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    ok, waited = _start_job_or_queue()
+    if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
         zip_buf = io.BytesIO()
@@ -802,7 +815,8 @@ def preview():
     if vin not in vg:
         return jsonify({'error': 'VIN not found: ' + vin}), 404
 
-    if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+    ok, waited = _start_job_or_queue()
+    if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
         try:
@@ -834,7 +848,8 @@ def generate_batch():
     vg     = group_by_vin(recs)
 
     if mode == 'individual':
-        if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+        ok, waited = _start_job_or_queue()
+        if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
         start_ts = time.time()
         try:
             zip_buf = io.BytesIO()
@@ -869,7 +884,8 @@ def generate_batch():
             _end_job(start_ts)
 
     elif mode == 'all-merged':
-        if not _try_start_job(): return jsonify({'error':'Server busy. Try again shortly.'}), 429
+        ok, waited = _start_job_or_queue()
+        if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
         start_ts = time.time()
         try:
             from collections import defaultdict

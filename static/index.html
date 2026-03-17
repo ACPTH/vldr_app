@@ -168,6 +168,7 @@ iframe{width:100%;height:100%;border:none}
 
   <!-- STATUS BAR -->
   <div id="sbar" class="sbar warn">Waiting for server...</div>
+  <div id="loadbar" class="sbar" style="display:none"></div>
 
   <!-- DROP ZONE (shown when no data) -->
   <div id="drop-wrap" class="drop-wrap"
@@ -356,10 +357,12 @@ function checkServer(){
     document.getElementById('stxt').textContent=n+'/9 templates';
     setSbar('ok','Server connected — '+n+'/9 templates ready');
     fetch('/api/manual-fields-all').then(function(r){return r.json();}).then(function(d){allManualFields=d;});
+    startLoadStatus();
   }).catch(function(){
     document.getElementById('sdot').className='status-dot err';
     document.getElementById('stxt').textContent='Offline';
     setSbar('err','Server not responding — run: python app.py');
+    stopLoadStatus();
   });
 }
 
@@ -367,6 +370,25 @@ function setSbar(cls,msg){
   var b=document.getElementById('sbar');
   b.className='sbar '+cls;
   b.textContent=msg;
+}
+
+var loadTimer=null;
+function startLoadStatus(){
+  if(loadTimer) return;
+  loadTimer=setInterval(function(){
+    fetch('/api/server-status').then(function(r){return r.json();}).then(function(s){
+      var b=document.getElementById('loadbar');
+      if(!b) return;
+      var msg='Queue: '+(s.queued||0)+' | Active: '+(s.active||0)+'/'+(s.max||0)+' | Avg: '+(s.avg_sec||0)+'s';
+      b.className='sbar '+((s.queued||0)>0?'warn':'ok');
+      b.textContent=msg;
+      b.style.display='flex';
+    }).catch(function(){});
+  }, 3000);
+}
+function stopLoadStatus(){
+  if(loadTimer){clearInterval(loadTimer);loadTimer=null;}
+  var b=document.getElementById('loadbar'); if(b) b.style.display='none';
 }
 
 /* ── Import ───────────────────────────────────────────── */
