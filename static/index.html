@@ -452,8 +452,18 @@ function buildRows(){
   ROWS=[];
   var skipped=0;
   Object.keys(VIN_GROUPS).forEach(function(vin){
-    var rs=VIN_GROUPS[vin], r0=rs[0];
+    var rs=VIN_GROUPS[vin]||[];
+    // keep only real damage lines (part/type/extent/classification not empty or '-')
+    rs = rs.filter(function(r){
+      var p=(r.damage_part_code||'').toString().trim();
+      var t=(r.damage_type_code||'').toString().trim();
+      var e=(r.damage_extent_code||'').toString().trim();
+      var c=(r.damage_classification||'').toString().trim();
+      var bad=function(x){return !x || x==='-' || x.toLowerCase()==='nan' || x.toLowerCase()==='none';};
+      return !(bad(p) && bad(t) && bad(e) && bad(c));
+    });
     if(!rs || rs.length===0){ skipped++; return; } // skip VINs with zero damages
+    var r0=rs[0];
     var make=(r0.make&&r0.make!=='-')?r0.make:'';
     var detFmt=make?MAKE_FMT[make.toLowerCase()]:null;
     if(detFmt && FORMATS.indexOf(detFmt)===-1) detFmt=null;
