@@ -7,6 +7,14 @@ services:
         generateValue: true
       - key: VLDR_DB_PATH
         value: /var/data/users.db
+      - key: VLDR_MAX_JOBS
+        value: "1"
+      - key: VLDR_CACHE_MAX
+        value: "20"
+      - key: VLDR_QUEUE_TIMEOUT
+        value: "60"
+      - key: VLDR_SPOOL_MB
+        value: "16"
     disk:
       name: vldr-data
       mountPath: /var/data

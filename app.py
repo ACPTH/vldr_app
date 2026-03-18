@@ -3,7 +3,7 @@ VLDR Generator - Flask Backend
 Run: python app.py  |  Open: http://localhost:5050
 Place PDF templates in ./templates/ folder (same directory as app.py)
 """
-import os, io, zipfile, json, base64, time, threading, hashlib
+import os, io, zipfile, json, base64, time, threading, hashlib, tempfile
 from collections import deque, OrderedDict
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
@@ -30,8 +30,10 @@ _job_lock = threading.Lock()
 _active_jobs = 0
 _queued_jobs = 0
 _recent_times = deque(maxlen=30)
-MAX_CACHE = int(os.environ.get('VLDR_CACHE_MAX', '200'))
+_default_cache_max = '20' if os.environ.get('RENDER') else '200'
+MAX_CACHE = int(os.environ.get('VLDR_CACHE_MAX', _default_cache_max))
 _pdf_cache = OrderedDict()  # key -> bytes
+SPOOL_MAX_MB = int(os.environ.get('VLDR_SPOOL_MB', '16'))
 
 @app.errorhandler(Exception)
 def handle_any_exception(e):
@@ -118,6 +120,17 @@ def get_cached_flat(fmt, vin, records, manual):
     data = flat.read()
     _cache_set(key, data)
     return io.BytesIO(data)
+
+def get_uncached_flat(fmt, vin, records, manual):
+    """Return flattened PDF bytes without touching LRU cache (lower memory for big batches)."""
+    tpl = get_template(fmt)
+    fsz = FONT_SIZES.get(fmt, {})
+    comb_skip = comb_skip_for(fmt)
+    return fill_pdf_and_overlay_comb(tpl, BUILDERS[fmt](vin, records, manual), fsz, comb_skip=comb_skip)
+
+def _spooled_buffer():
+    """In-memory buffer that spills to disk after threshold."""
+    return tempfile.SpooledTemporaryFile(max_size=SPOOL_MAX_MB * 1024 * 1024, mode='w+b')
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
 from auth import login_required, admin_required, get_all_users, create_user, update_user, delete_user
@@ -559,7 +572,7 @@ def make_merged_pdf(fmt, target_vins, vin_groups, manual):
     return out
 
 def make_individual_zip(fmt, target_vins, vin_groups, manual):
-    zip_buf = io.BytesIO()
+    zip_buf = _spooled_buffer()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for vin in target_vins:
             if vin not in vin_groups: continue
@@ -800,7 +813,7 @@ def generate_all():
     if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
-        zip_buf = io.BytesIO()
+        zip_buf = _spooled_buffer()
         with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
             for fmt in BUILDERS:
                 if not is_format_allowed(fmt): continue
@@ -828,7 +841,7 @@ def generate_all_individual():
     if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
     start_ts = time.time()
     try:
-        zip_buf = io.BytesIO()
+        zip_buf = _spooled_buffer()
         with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
             for fmt in BUILDERS:
                 if not is_format_allowed(fmt): continue
@@ -836,7 +849,8 @@ def generate_all_individual():
                     manual = manuals.get(fmt,{})
                     for vin in target:
                         if vin not in vg: continue
-                        flat = get_cached_flat(fmt, vin, vg[vin], manual)
+                        # Avoid cache growth during massive all-format exports.
+                        flat = get_uncached_flat(fmt, vin, vg[vin], manual)
                         safe = vin.replace('/','_').replace('\\','_')
                         zf.writestr(fmt+'/'+safe+'.pdf', flat.read())  # VIN.pdf only
                 except Exception:
@@ -906,7 +920,7 @@ def generate_batch():
         if not ok: return jsonify({'error':'Server busy. Try again shortly.'}), 429
         start_ts = time.time()
         try:
-            zip_buf = io.BytesIO()
+            zip_buf = _spooled_buffer()
             with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for item in items:
                     fmt    = item.get('format', '').upper()
@@ -917,7 +931,8 @@ def generate_batch():
                     if not is_format_allowed(fmt):
                         continue
                     try:
-                        flat = get_cached_flat(fmt, vin, vg[vin], manual)  # flatten = non-editable
+                        # Batch mode: avoid storing every PDF in LRU cache (OOM on small instances).
+                        flat = get_uncached_flat(fmt, vin, vg[vin], manual)  # flatten = non-editable
                         safe = vin.replace('/', '_').replace('\\', '_')
                         zf.writestr(safe + '.pdf', flat.read()) # VIN.pdf only
                     except Exception:
@@ -942,7 +957,7 @@ def generate_batch():
                 by_fmt[fmt].append(item.get('vin',''))
                 manual_by_fmt[fmt] = item.get('manual', {})
 
-            zip_buf = io.BytesIO()
+            zip_buf = _spooled_buffer()
             with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fmt, vins in by_fmt.items():
                     if fmt not in BUILDERS: continue
@@ -951,10 +966,12 @@ def generate_batch():
                         merged = PdfWriter()
                         for vin in vins:
                             if vin not in vg: continue
-                            flat = get_cached_flat(fmt, vin, vg[vin], manual_by_fmt.get(fmt,{}))
+                            flat = get_uncached_flat(fmt, vin, vg[vin], manual_by_fmt.get(fmt,{}))
                             merged.append(PdfReader(flat))
-                        pdf_out = io.BytesIO(); merged.write(pdf_out)
-                        zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.getvalue())
+                        pdf_out = _spooled_buffer()
+                        merged.write(pdf_out)
+                        pdf_out.seek(0)
+                        zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.read())
                     except Exception:
                         pass
             zip_buf.seek(0)
