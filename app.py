@@ -234,6 +234,11 @@ def _chunks(lst, n):
 def _safe_vin(v):
     return (v or '').replace('/', '_').replace('\\', '_')
 
+def _is_fmt_allowed_for_payload(fmt, allowed_formats):
+    if not allowed_formats:
+        return True
+    return fmt in allowed_formats
+
 def process_job(job_id):
     row = get_job(job_id)
     if not row:
@@ -242,6 +247,7 @@ def process_job(job_id):
         payload = json.loads(row['payload'] or '{}')
         items = payload.get('items', []) or []
         mode = payload.get('mode', 'individual')
+        allowed_formats = payload.get('allowed_formats', None)
         recs = filter_damage_records(payload.get('records', []) or [])
         vg = group_by_vin(recs)
         total = len(items)
@@ -260,7 +266,7 @@ def process_job(job_id):
                         vin = item.get('vin', '') or ''
                         manual = item.get('manual', {}) or {}
                         done += 1
-                        if fmt not in BUILDERS or vin not in vg or not is_format_allowed(fmt):
+                        if fmt not in BUILDERS or vin not in vg or not _is_fmt_allowed_for_payload(fmt, allowed_formats):
                             pct = 10 + int((done / max(1, total)) * 80)
                             update_job(job_id, done_items=done, progress=min(92, pct), message=f'Processing {done}/{total}')
                             continue
@@ -286,7 +292,7 @@ def process_job(job_id):
                 total_fmt = len(fmts) or 1
                 for fmt, vins in fmts:
                     done += 1
-                    if fmt not in BUILDERS or not is_format_allowed(fmt):
+                    if fmt not in BUILDERS or not _is_fmt_allowed_for_payload(fmt, allowed_formats):
                         pct = 10 + int((done / total_fmt) * 80)
                         update_job(job_id, progress=min(92, pct), message=f'Merging formats {done}/{total_fmt}')
                         continue
@@ -324,13 +330,21 @@ def job_worker_loop():
         process_job(job_id)
 
 _jobs_bootstrapped = False
+_jobs_available = False
 def bootstrap_jobs():
-    global _jobs_bootstrapped
+    global _jobs_bootstrapped, _jobs_available
     if _jobs_bootstrapped:
         return
-    init_jobs_db()
-    threading.Thread(target=job_worker_loop, daemon=True).start()
-    _jobs_bootstrapped = True
+    try:
+        init_jobs_db()
+        threading.Thread(target=job_worker_loop, daemon=True).start()
+        _jobs_available = True
+        _jobs_bootstrapped = True
+    except Exception as e:
+        # Never block app startup if async queue fails in constrained environments.
+        _jobs_available = False
+        _jobs_bootstrapped = True
+        print('WARNING: async jobs disabled:', str(e))
 
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
@@ -1189,6 +1203,10 @@ def generate_batch():
 @app.route('/api/generate-batch-async', methods=['POST'])
 def generate_batch_async():
     """Queue batch generation and return job id immediately."""
+    if not _jobs_bootstrapped:
+        bootstrap_jobs()
+    if not _jobs_available:
+        return jsonify({'error': 'Async job queue unavailable on this instance'}), 503
     data = request.get_json(silent=True) or {}
     items = data.get('items', []) or []
     mode = data.get('mode', 'individual')
@@ -1196,15 +1214,19 @@ def generate_batch_async():
         return jsonify({'error': 'Unknown mode'}), 400
     if not items:
         return jsonify({'error': 'No items to process'}), 400
+    cu = current_user()
     job_id = create_job({
         'items': items,
         'mode': mode,
-        'records': data.get('records', []) or []
+        'records': data.get('records', []) or [],
+        'allowed_formats': cu.get('allowed_formats')
     })
     return jsonify({'ok': True, 'job_id': job_id})
 
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job_status(job_id):
+    if not _jobs_available:
+        return jsonify({'error': 'Async job queue unavailable on this instance'}), 503
     row = get_job(job_id)
     if not row:
         return jsonify({'error': 'Job not found'}), 404
@@ -1220,6 +1242,8 @@ def get_job_status(job_id):
 
 @app.route('/api/jobs/<job_id>/download', methods=['GET'])
 def download_job_result(job_id):
+    if not _jobs_available:
+        return jsonify({'error': 'Async job queue unavailable on this instance'}), 503
     row = get_job(job_id)
     if not row:
         return jsonify({'error': 'Job not found'}), 404
