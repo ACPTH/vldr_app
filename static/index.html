@@ -949,6 +949,47 @@ function failProgress(txt){
   }, 1400);
 }
 
+function pollJobAndDownload(jobId){
+  var tries=0, maxTries=900; // ~30 min at 2s
+  function tick(){
+    tries++;
+    fetch('/api/jobs/'+jobId)
+      .then(function(r){return parseJsonSafe(r).then(function(d){d._status=r.status;return d;});})
+      .then(function(j){
+        if(j.error || j._status>=400){
+          throw new Error((j && j.error) ? j.error : ('Job status HTTP '+j._status));
+        }
+        var p = (typeof j.progress==='number') ? j.progress : 0;
+        setProgressValue(p);
+        var msg = j.message || ('Status: '+(j.status||'queued'));
+        var meta = 'Items '+(j.done_items||0)+'/'+(j.total_items||0);
+        setProgressText(msg, meta);
+
+        if(j.status==='done'){
+          progressStage('Downloading archive...',95);
+          var a=document.createElement('a');
+          a.href='/api/jobs/'+jobId+'/download';
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          finishProgress('Download complete');
+          toast('Archive downloaded','ok');
+          return;
+        }
+        if(j.status==='error'){
+          throw new Error(j.error || 'Job failed');
+        }
+        if(tries >= maxTries){
+          throw new Error('Job timeout');
+        }
+        setTimeout(tick, 2000);
+      })
+      .catch(function(e){
+        failProgress(e.message||'Error');
+        toast('Error: '+(e.message||'Unknown error'),'err');
+      });
+  }
+  setTimeout(tick, 1200);
+}
+
 /*  Preview  */
 function parseJsonSafe(r){
   return r.text().then(function(t){
@@ -1152,33 +1193,27 @@ function doDownloadRows(rows){
 
 function doDownload(rows, mode){
   showProgress('Generating '+rows.length+' file(s)...');
-  progressStage('Sending request...',12);
+  progressStage('Queueing job...',12);
 
   var items=rows.map(function(r){
     return {vin:r.vin,format:r.format,manual:r.manual||{}};
   });
 
-  fetch('/api/generate-batch',{
+  fetch('/api/generate-batch-async',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({items:items,mode:mode,records:RECORDS})
   })
   .then(function(r){
-    if(!r.ok) return parseJsonSafe(r).then(function(e){throw new Error((e && e.error) ? e.error : ('HTTP '+r.status));});
-    progressStage('Building archive on server...',72);
-    var cd=r.headers.get('content-disposition')||'';
-    var m=cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-    var fn=m?m[1].replace(/['"]/g,''):'VLDR_export.zip';
-    return r.blob().then(function(b){return{blob:b,fname:fn};});
+    return parseJsonSafe(r).then(function(d){
+      if(!r.ok) throw new Error((d && d.error) ? d.error : ('HTTP '+r.status));
+      return d;
+    });
   })
   .then(function(res){
-    progressStage('Downloading archive...',92);
-    var url=URL.createObjectURL(res.blob);
-    var a=document.createElement('a'); a.href=url; a.download=res.fname;
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    finishProgress('Download complete');
-    toast(res.fname+' downloaded','ok');
+    if(!res.job_id) throw new Error('Missing job_id');
+    progressStage('Queued. Waiting for worker...',18);
+    pollJobAndDownload(res.job_id);
   })
   .catch(function(e){
     failProgress(e.message||'Error');

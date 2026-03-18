@@ -3,7 +3,7 @@ VLDR Generator - Flask Backend
 Run: python app.py  |  Open: http://localhost:5050
 Place PDF templates in ./templates/ folder (same directory as app.py)
 """
-import os, io, zipfile, json, base64, time, threading, hashlib, tempfile
+import os, io, zipfile, json, base64, time, threading, hashlib, tempfile, sqlite3, uuid, traceback
 from collections import deque, OrderedDict
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
@@ -21,6 +21,8 @@ app.permanent_session_lifetime = timedelta(hours=8)
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 STATIC_DIR   = os.path.join(BASE_DIR, 'static')
+DB_PATH_ENV  = os.environ.get('VLDR_DB_PATH', os.path.join(BASE_DIR, 'users.db'))
+JOB_DIR      = os.environ.get('VLDR_JOB_DIR', os.path.join(os.path.dirname(DB_PATH_ENV), 'jobs'))
 
 # Concurrency control (Render free is tight)
 MAX_JOBS = int(os.environ.get('VLDR_MAX_JOBS', '2'))
@@ -34,6 +36,8 @@ _default_cache_max = '20' if os.environ.get('RENDER') else '200'
 MAX_CACHE = int(os.environ.get('VLDR_CACHE_MAX', _default_cache_max))
 _pdf_cache = OrderedDict()  # key -> bytes
 SPOOL_MAX_MB = int(os.environ.get('VLDR_SPOOL_MB', '16'))
+JOB_POLL_SEC = float(os.environ.get('VLDR_JOB_POLL_SEC', '1.2'))
+JOB_BATCH_SIZE = int(os.environ.get('VLDR_JOB_BATCH_SIZE', '5'))
 
 @app.errorhandler(Exception)
 def handle_any_exception(e):
@@ -131,6 +135,203 @@ def get_uncached_flat(fmt, vin, records, manual):
 def _spooled_buffer():
     """In-memory buffer that spills to disk after threshold."""
     return tempfile.SpooledTemporaryFile(max_size=SPOOL_MAX_MB * 1024 * 1024, mode='w+b')
+
+def _jobs_connect():
+    con = sqlite3.connect(os.path.join(os.path.dirname(DB_PATH_ENV), 'jobs.db'))
+    con.row_factory = sqlite3.Row
+    return con
+
+def init_jobs_db():
+    os.makedirs(JOB_DIR, exist_ok=True)
+    con = _jobs_connect()
+    cur = con.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL DEFAULT 0,
+            message TEXT,
+            error TEXT,
+            payload TEXT NOT NULL,
+            result_path TEXT,
+            result_name TEXT,
+            total_items INTEGER NOT NULL DEFAULT 0,
+            done_items INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at)')
+    con.commit()
+    cur.close()
+    con.close()
+
+def create_job(payload_dict):
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    total = len(payload_dict.get('items', []) or [])
+    con = _jobs_connect()
+    cur = con.cursor()
+    cur.execute('''
+        INSERT INTO jobs (id, status, progress, message, payload, total_items, done_items, created_at, updated_at)
+        VALUES (?, 'queued', 0, ?, ?, ?, 0, ?, ?)
+    ''', (job_id, 'Queued', json.dumps(payload_dict, ensure_ascii=False), total, now, now))
+    con.commit()
+    cur.close()
+    con.close()
+    return job_id
+
+def get_job(job_id):
+    con = _jobs_connect()
+    cur = con.cursor()
+    cur.execute('SELECT * FROM jobs WHERE id=?', (job_id,))
+    row = cur.fetchone()
+    cur.close()
+    con.close()
+    return row
+
+def update_job(job_id, **fields):
+    if not fields:
+        return
+    fields['updated_at'] = time.time()
+    sets = ', '.join([f'{k}=?' for k in fields.keys()])
+    vals = list(fields.values()) + [job_id]
+    con = _jobs_connect()
+    cur = con.cursor()
+    cur.execute(f'UPDATE jobs SET {sets} WHERE id=?', vals)
+    con.commit()
+    cur.close()
+    con.close()
+
+def claim_next_job():
+    con = _jobs_connect()
+    cur = con.cursor()
+    try:
+        cur.execute('BEGIN IMMEDIATE')
+        cur.execute('SELECT id FROM jobs WHERE status=? ORDER BY created_at ASC LIMIT 1', ('queued',))
+        row = cur.fetchone()
+        if not row:
+            con.commit()
+            return None
+        job_id = row['id']
+        now = time.time()
+        cur.execute('''
+            UPDATE jobs
+            SET status='running', message=?, progress=5, updated_at=?
+            WHERE id=?
+        ''', ('Starting...', now, job_id))
+        con.commit()
+        return job_id
+    finally:
+        cur.close()
+        con.close()
+
+def _chunks(lst, n):
+    n = max(1, int(n))
+    for i in range(0, len(lst), n):
+        yield lst[i:i+n]
+
+def _safe_vin(v):
+    return (v or '').replace('/', '_').replace('\\', '_')
+
+def process_job(job_id):
+    row = get_job(job_id)
+    if not row:
+        return
+    try:
+        payload = json.loads(row['payload'] or '{}')
+        items = payload.get('items', []) or []
+        mode = payload.get('mode', 'individual')
+        recs = filter_damage_records(payload.get('records', []) or [])
+        vg = group_by_vin(recs)
+        total = len(items)
+        update_job(job_id, message='Preparing...', total_items=total, done_items=0, progress=8)
+
+        out_name = 'VLDR_selected_' + str(total) + 'vins.zip' if mode == 'individual' else 'VLDR_all_formats.zip'
+        out_path = os.path.join(JOB_DIR, job_id + '.zip')
+        written = 0
+
+        with zipfile.ZipFile(out_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            if mode == 'individual':
+                done = 0
+                for batch in _chunks(items, JOB_BATCH_SIZE):
+                    for item in batch:
+                        fmt = (item.get('format', '') or '').upper()
+                        vin = item.get('vin', '') or ''
+                        manual = item.get('manual', {}) or {}
+                        done += 1
+                        if fmt not in BUILDERS or vin not in vg or not is_format_allowed(fmt):
+                            pct = 10 + int((done / max(1, total)) * 80)
+                            update_job(job_id, done_items=done, progress=min(92, pct), message=f'Processing {done}/{total}')
+                            continue
+                        try:
+                            flat = get_uncached_flat(fmt, vin, vg[vin], manual)
+                            zf.writestr(_safe_vin(vin) + '.pdf', flat.read())
+                            written += 1
+                        except Exception:
+                            pass
+                        pct = 10 + int((done / max(1, total)) * 80)
+                        update_job(job_id, done_items=done, progress=min(92, pct), message=f'Processing {done}/{total}')
+            elif mode == 'all-merged':
+                from collections import defaultdict
+                by_fmt = defaultdict(list)
+                manual_by_fmt = {}
+                for item in items:
+                    fmt = (item.get('format', '') or '').upper()
+                    by_fmt[fmt].append(item.get('vin', '') or '')
+                    manual_by_fmt[fmt] = item.get('manual', {}) or {}
+
+                fmts = list(by_fmt.items())
+                done = 0
+                total_fmt = len(fmts) or 1
+                for fmt, vins in fmts:
+                    done += 1
+                    if fmt not in BUILDERS or not is_format_allowed(fmt):
+                        pct = 10 + int((done / total_fmt) * 80)
+                        update_job(job_id, progress=min(92, pct), message=f'Merging formats {done}/{total_fmt}')
+                        continue
+                    try:
+                        merged = PdfWriter()
+                        for vin in vins:
+                            if vin not in vg:
+                                continue
+                            flat = get_uncached_flat(fmt, vin, vg[vin], manual_by_fmt.get(fmt, {}))
+                            merged.append(PdfReader(flat))
+                        pdf_out = _spooled_buffer()
+                        merged.write(pdf_out)
+                        pdf_out.seek(0)
+                        zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.read())
+                        written += 1
+                    except Exception:
+                        pass
+                    pct = 10 + int((done / total_fmt) * 80)
+                    update_job(job_id, progress=min(92, pct), message=f'Merging formats {done}/{total_fmt}')
+            else:
+                raise ValueError('Unknown mode')
+
+        if written <= 0:
+            raise ValueError('No files generated')
+        update_job(job_id, status='done', progress=100, message='Done', result_path=out_path, result_name=out_name)
+    except Exception as e:
+        update_job(job_id, status='error', progress=100, message='Error', error=str(e) + '\n' + traceback.format_exc())
+
+def job_worker_loop():
+    while True:
+        job_id = claim_next_job()
+        if not job_id:
+            time.sleep(JOB_POLL_SEC)
+            continue
+        process_job(job_id)
+
+_jobs_bootstrapped = False
+def bootstrap_jobs():
+    global _jobs_bootstrapped
+    if _jobs_bootstrapped:
+        return
+    init_jobs_db()
+    threading.Thread(target=job_worker_loop, daemon=True).start()
+    _jobs_bootstrapped = True
+
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
 from auth import login_required, admin_required, get_all_users, create_user, update_user, delete_user
@@ -553,6 +754,8 @@ def build_VOLVO(vin, records, manual):
 BUILDERS = {'BMW':build_BMW,'ECG':build_ECG,'FCA':build_FCA,'FORD':build_FORD,
             'LINKCO':build_LINKCO,'RENAULT':build_RENAULT,'STELLANTIS':build_STELLANTIS,
             'VGED':build_VGED,'VOLVO':build_VOLVO}
+
+bootstrap_jobs()
 
 def group_by_vin(records):
     g = {}
@@ -983,10 +1186,56 @@ def generate_batch():
     else:
         return jsonify({'error': 'Unknown mode'}), 400
 
+@app.route('/api/generate-batch-async', methods=['POST'])
+def generate_batch_async():
+    """Queue batch generation and return job id immediately."""
+    data = request.get_json(silent=True) or {}
+    items = data.get('items', []) or []
+    mode = data.get('mode', 'individual')
+    if mode not in ('individual', 'all-merged'):
+        return jsonify({'error': 'Unknown mode'}), 400
+    if not items:
+        return jsonify({'error': 'No items to process'}), 400
+    job_id = create_job({
+        'items': items,
+        'mode': mode,
+        'records': data.get('records', []) or []
+    })
+    return jsonify({'ok': True, 'job_id': job_id})
+
+@app.route('/api/jobs/<job_id>', methods=['GET'])
+def get_job_status(job_id):
+    row = get_job(job_id)
+    if not row:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify({
+        'id': row['id'],
+        'status': row['status'],
+        'progress': row['progress'] or 0,
+        'message': row['message'] or '',
+        'error': row['error'],
+        'total_items': row['total_items'] or 0,
+        'done_items': row['done_items'] or 0
+    })
+
+@app.route('/api/jobs/<job_id>/download', methods=['GET'])
+def download_job_result(job_id):
+    row = get_job(job_id)
+    if not row:
+        return jsonify({'error': 'Job not found'}), 404
+    if row['status'] != 'done':
+        return jsonify({'error': 'Job is not ready yet'}), 409
+    path = row['result_path'] or ''
+    if not path or not os.path.exists(path):
+        return jsonify({'error': 'Result file not found'}), 404
+    name = row['result_name'] or ('VLDR_' + job_id + '.zip')
+    return send_file(path, mimetype='application/zip', as_attachment=True, download_name=name)
+
 
 if __name__ == '__main__':
     os.makedirs(STATIC_DIR, exist_ok=True)
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
+    bootstrap_jobs()
     missing = [f for f,n in TEMPLATE_FILES.items()
                if not os.path.exists(os.path.join(TEMPLATE_DIR, n))]
     # Init auth database
