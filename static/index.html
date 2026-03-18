@@ -20,7 +20,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--sans)}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
 
-/* ── Layout ── */
+/*  Layout  */
 .shell{display:flex;flex-direction:column;height:100vh}
 .topbar{background:#1B4F8A;border-bottom:1px solid #163f6e;padding:0 18px;display:flex;align-items:center;gap:10px;height:50px;flex-shrink:0}
 .logo-mark{display:none}
@@ -32,7 +32,7 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .status-dot.ok{background:var(--green)}.status-dot.err{background:var(--red)}
 .status-txt{font-size:10px;color:rgba(255,255,255,.75)}
 
-/* ── Buttons ── */
+/*  Buttons  */
 .btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:var(--r);font-size:11px;font-weight:600;border:none;transition:all .15s;white-space:nowrap;cursor:pointer;letter-spacing:.01em}
 .btn-ghost{background:#fff;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:#1B4F8A;color:#1B4F8A;background:#eef4fc}
 .topbar .btn-ghost{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff}.topbar .btn-ghost:hover{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.5);color:#fff}
@@ -45,23 +45,23 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .btn-xs{padding:4px 9px;font-size:10px;font-weight:600}
 .btn:disabled,.btn[data-off]{opacity:.4;cursor:not-allowed}
 
-/* ── Status bar ── */
+/*  Status bar  */
 .sbar{padding:4px 18px;font-size:10px;display:flex;align-items:center;gap:6px;flex-shrink:0;border-bottom:1px solid transparent}
 .sbar.ok{background:#eaf7ee;border-color:#a8d5b5;color:#1B7A3E}
 .sbar.err{background:#fdf0ee;border-color:#e8b4ae;color:#c0392b}
 .sbar.warn{background:#fdf6e8;border-color:#e8cfa0;color:#b86c00}
 
-/* ── Drop zone ── */
+/*  Drop zone  */
 .drop-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:40px}
 .drop-zone{border:2px dashed #b8c4d8;border-radius:12px;padding:52px 40px;text-align:center;cursor:pointer;transition:all .2s;max-width:480px;width:100%;background:#fff;box-shadow:0 2px 12px rgba(27,79,138,.08)}
 .drop-zone:hover,.drop-zone.drag{border-color:#1B4F8A;background:#eef4fc}
 .drop-icon{font-size:40px;margin-bottom:12px}.drop-title{font-size:16px;font-weight:600;margin-bottom:5px}
 .drop-sub{font-size:12px;color:var(--text2)}.drop-hint{font-size:10px;color:var(--text3);margin-top:6px;font-family:var(--mono)}
 
-/* ── Main content ── */
+/*  Main content  */
 .main-content{flex:1;overflow:hidden;display:flex;flex-direction:column}
 
-/* ── Action bar ── */
+/*  Action bar  */
 .action-bar{padding:8px 18px;background:#ffffff;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;box-shadow:0 1px 4px rgba(0,0,0,.06)}
 .abar-info{font-size:11px;color:var(--text2)}.abar-info strong{color:var(--text)}
 .abar-sep{width:1px;height:20px;background:var(--border);margin:0 2px}
@@ -82,7 +82,7 @@ button{cursor:pointer;font-family:var(--sans)}input,select{font-family:var(--san
 .sort-th{cursor:pointer;user-select:none}
 .sort-th span{opacity:.6;font-size:9px;margin-left:4px}
 
-/* ── Table ── */
+/*  Table  */
 .tbl-wrap{flex:1;overflow:auto;padding:0;background:#fff}
 table{width:100%;border-collapse:collapse;font-size:11.5px}
 thead{position:sticky;top:0;z-index:2}
@@ -149,6 +149,9 @@ iframe{width:100%;height:100%;border:none}
 /* Progress */
 .prog-bar-wrap{height:3px;background:var(--surf3);border-radius:2px;overflow:hidden;margin-top:6px}
 .prog-bar-fill{height:100%;background:linear-gradient(90deg,#1B4F8A,#1B7A3E);border-radius:2px;transition:width .4s}
+.prog-panel{display:flex;flex-direction:column;gap:2px;min-width:230px;max-width:280px}
+.prog-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.prog-meta{font-size:9px;color:var(--text3)}
 
 /* Toast */
 .toasts{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:7px;z-index:100;pointer-events:none}
@@ -235,13 +238,13 @@ iframe{width:100%;height:100%;border:none}
         <input class="filter-inp" id="f-vin" placeholder="Filter VIN">
         <div class="filter-dd" id="dd-make">
           <button class="filter-btn" type="button" onclick="toggleFilterDD('make')">
-            <span id="f-make-label">Make (all)</span><span>▼</span>
+            <span id="f-make-label">Make (all)</span><span></span>
           </button>
           <div class="filter-menu" id="f-make-menu"></div>
         </div>
         <div class="filter-dd" id="dd-class">
           <button class="filter-btn" type="button" onclick="toggleFilterDD('class')">
-            <span id="f-class-label">Classification (all)</span><span>▼</span>
+            <span id="f-class-label">Classification (all)</span><span></span>
           </button>
           <div class="filter-menu" id="f-class-menu"></div>
         </div>
@@ -252,7 +255,14 @@ iframe{width:100%;height:100%;border:none}
       <div class="filter-chips" id="filter-chips"></div>
 
       <!-- Progress inline -->
-      <span id="prog-txt" class="hidden" style="font-size:10px;color:var(--text2)">Generating...</span>
+      <div id="prog-wrap" class="prog-panel hidden">
+        <div class="prog-top">
+          <span id="prog-txt" style="font-size:10px;color:var(--text2)">Generating...</span>
+          <span id="prog-pct" class="prog-meta">0%</span>
+        </div>
+        <div class="prog-bar-wrap"><div id="prog-fill" class="prog-bar-fill" style="width:0%"></div></div>
+        <span id="prog-meta" class="prog-meta"></span>
+      </div>
     </div>
 
     <!-- TABLE -->
@@ -320,12 +330,12 @@ iframe{width:100%;height:100%;border:none}
 <div class="toasts" id="toasts"></div>
 
 <script>
-/* ── Helpers ────────────────────────────────────────────── */
+/*  Helpers  */
 function escHtml(s){
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/* ── Make -> Format ─────────────────────────────────────── */
+/*  Make -> Format  */
 var MAKE_FMT = {
   'bmw':'BMW','mini':'BMW',
   'peugeot':'STELLANTIS','citroen':'STELLANTIS','citron':'STELLANTIS','opel':'STELLANTIS','vauxhall':'STELLANTIS',
@@ -348,7 +358,7 @@ var CLS_MAP = {
   'V1':'cls-V','V2':'cls-V'
 };
 
-/* ── State ────────────────────────────────────────────── */
+/*  State  */
 var RECORDS=[], VIN_GROUPS={};
 var ROWS=[];          // [{vin, make, model, format, isAuto, records, checked, manual}]
 var serverOK=false, templateStatus={}, allManualFields={};
@@ -358,8 +368,9 @@ var activeFmtDD=null; // row index with open fmt dropdown
 var activeFilterDD=null; // 'make' | 'class'
 var pendingAction=null;
 var previewVin=null, previewFmt=null, previewPdfUrl=null;
+var progPulseTimer=null, progStatusTimer=null, progValue=0;
 
-/* ── Init ─────────────────────────────────────────────── */
+/*  Init  */
 window.onload=function(){
   loadUser();
   checkServer();
@@ -403,13 +414,13 @@ function checkServer(){
     var n=Object.values(d).filter(Boolean).length;
     document.getElementById('sdot').className='status-dot ok';
     document.getElementById('stxt').textContent=n+'/9 templates';
-    setSbar('ok','Server connected — '+n+'/9 templates ready');
+    setSbar('ok','Server connected - '+n+'/9 templates ready');
     fetch('/api/manual-fields-all').then(function(r){return r.json();}).then(function(d){allManualFields=d;});
     startLoadStatus();
   }).catch(function(){
     document.getElementById('sdot').className='status-dot err';
     document.getElementById('stxt').textContent='Offline';
-    setSbar('err','Server not responding — run: python app.py');
+    setSbar('err','Server not responding - run: python app.py');
     stopLoadStatus();
   });
 }
@@ -439,7 +450,7 @@ function stopLoadStatus(){
   var b=document.getElementById('loadbar'); if(b) b.style.display='none';
 }
 
-/* ── Import ───────────────────────────────────────────── */
+/*  Import  */
 function onDrop(e){
   e.preventDefault();
   document.getElementById('dzone').classList.remove('drag');
@@ -448,7 +459,7 @@ function onDrop(e){
 function importFile(inp){if(inp.files&&inp.files[0])processFile(inp.files[0]);inp.value='';}
 
 function processFile(file){
-  if(!serverOK){toast('Server not running — start python app.py','err');return;}
+  if(!serverOK){toast('Server not running - start python app.py','err');return;}
   toast('Parsing Excel...','info');
   var fd=new FormData(); fd.append('file',file);
   fetch('/api/parse-excel',{method:'POST',body:fd})
@@ -462,7 +473,7 @@ function processFile(file){
       document.getElementById('drop-wrap').classList.add('hidden');
       document.getElementById('main-content').classList.remove('hidden');
       enableButtons();
-      toast('Loaded '+d.count+' records — '+Object.keys(VIN_GROUPS).length+' VINs','ok');
+      toast('Loaded '+d.count+' records - '+Object.keys(VIN_GROUPS).length+' VINs','ok');
     }).catch(function(e){toast('Error: '+e.message,'err');});
 }
 
@@ -515,7 +526,7 @@ function buildRows(){
   document.getElementById('abar-info').innerHTML=info;
 }
 
-/* ── Table render ─────────────────────────────────────── */
+/*  Table render  */
 function renderTable(){
   var tbody=document.getElementById('tbl-body');
   var html='';
@@ -635,7 +646,7 @@ function updateSortIndicators(){
     var el=document.getElementById('sort-'+k);
     if(!el) return;
     if(SORT.key!==k){el.textContent='';return;}
-    el.textContent = SORT.dir===1?'▲':'▼';
+    el.textContent = SORT.dir===1?'':'';
   });
 }
 
@@ -798,7 +809,7 @@ function wireRemarkInputs(){
   }
 }
 
-/* ── Format dropdown ──────────────────────────────────── */
+/*  Format dropdown  */
 function openFmtDD(rowIdx, e){
   e.stopPropagation();
   var target=e.currentTarget;
@@ -831,7 +842,7 @@ function setRowFmt(rowIdx,fmt){
   renderTable();
 }
 
-/* ── Selection ────────────────────────────────────────── */
+/*  Selection  */
 function toggleRow(idx,chk){
   ROWS[idx].checked=chk.checked;
   var tr=document.getElementById('tr-'+idx);
@@ -873,12 +884,84 @@ function enableButtons(){
   });
 }
 
-/* ── Preview ──────────────────────────────────────────── */
+function setProgressValue(v){
+  progValue=Math.max(0,Math.min(100,Math.floor(v||0)));
+  var fill=document.getElementById('prog-fill');
+  var pct=document.getElementById('prog-pct');
+  if(fill) fill.style.width=progValue+'%';
+  if(pct) pct.textContent=progValue+'%';
+}
+function setProgressText(txt, meta){
+  var pt=document.getElementById('prog-txt');
+  var pm=document.getElementById('prog-meta');
+  if(pt) pt.textContent=txt||'Generating...';
+  if(pm) pm.textContent=meta||'';
+}
+function stopProgressTimers(){
+  if(progPulseTimer){clearInterval(progPulseTimer);progPulseTimer=null;}
+  if(progStatusTimer){clearInterval(progStatusTimer);progStatusTimer=null;}
+}
+function showProgress(txt){
+  var wrap=document.getElementById('prog-wrap');
+  if(wrap) wrap.classList.remove('hidden');
+  setProgressValue(6);
+  setProgressText(txt||'Preparing request...','');
+  stopProgressTimers();
+  progPulseTimer=setInterval(function(){
+    if(progValue<88) setProgressValue(progValue + (Math.random()*3+1));
+  }, 450);
+  progStatusTimer=setInterval(function(){
+    fetch('/api/server-status')
+      .then(function(r){return r.json();})
+      .then(function(s){
+        var q=s.queued||0, a=s.active||0, m=s.max||0, avg=s.avg_sec||0;
+        var meta='Queue '+q+' | Active '+a+'/'+m+' | Avg '+avg+'s';
+        setProgressText(document.getElementById('prog-txt').textContent, meta);
+        if(q>0 && progValue<25) setProgressValue(25);
+        if(a>0 && progValue<55) setProgressValue(55);
+      })
+      .catch(function(){});
+  }, 1500);
+}
+function progressStage(txt, minValue){
+  setProgressText(txt, document.getElementById('prog-meta').textContent);
+  if(typeof minValue==='number' && progValue<minValue) setProgressValue(minValue);
+}
+function finishProgress(txt){
+  stopProgressTimers();
+  progressStage(txt||'Done',100);
+  setTimeout(function(){
+    var wrap=document.getElementById('prog-wrap');
+    if(wrap) wrap.classList.add('hidden');
+    setProgressValue(0);
+    setProgressText('Generating...','');
+  }, 900);
+}
+function failProgress(txt){
+  stopProgressTimers();
+  progressStage('Error',100);
+  setProgressText('Error',txt||'');
+  setTimeout(function(){
+    var wrap=document.getElementById('prog-wrap');
+    if(wrap) wrap.classList.add('hidden');
+    setProgressValue(0);
+    setProgressText('Generating...','');
+  }, 1400);
+}
+
+/*  Preview  */
+function parseJsonSafe(r){
+  return r.text().then(function(t){
+    if(!t) return {};
+    try { return JSON.parse(t); }
+    catch(_){ return {error:'Server returned a non-JSON response', _raw:t}; }
+  });
+}
 function previewVinRow(idx){
   var row=ROWS[idx];
   previewVin=row.vin; previewFmt=row.format;
 
-  document.getElementById('prev-title').textContent='Preview — '+row.format+' — '+row.vin;
+  document.getElementById('prev-title').textContent='Preview - '+row.format+' - '+row.vin;
   document.getElementById('prev-loading').classList.remove('hidden');
   document.getElementById('prev-frame').classList.add('hidden');
   document.getElementById('preview-overlay').classList.add('show');
@@ -890,10 +973,10 @@ function previewVinRow(idx){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({format:row.format,vin:row.vin,records:RECORDS,manual:row.manual||{}})
   })
-  .then(function(r){return r.json().then(function(d){d._status=r.status;return d;});})
+  .then(function(r){return parseJsonSafe(r).then(function(d){d._status=r.status;return d;});})
   .then(function(d){
     if(d.error){
-      if(d._status===429) toast('Server busy — please wait and try again','err');
+      if(d._status===429) toast('Server busy - please wait and try again','err');
       else toast('Preview error: '+d.error,'err');
       closePreview();return;
     }
@@ -922,7 +1005,7 @@ function downloadPreviewPDF(){
   document.body.appendChild(a);a.click();document.body.removeChild(a);
 }
 
-/* ── Single row download (direct PDF, no ZIP) ─────────── */
+/*  Single row download (direct PDF, no ZIP)  */
 function downloadRowPDF(idx){
   var row=ROWS[idx];
   var mflds=allManualFields[row.format]||[];
@@ -935,40 +1018,42 @@ function downloadRowPDF(idx){
 function downloadRow(idx){ downloadRowPDF(idx); }
 
 function doSinglePDF(row){
-  var pt=document.getElementById('prog-txt');
-  pt.classList.remove('hidden'); pt.textContent='Generating '+row.vin+'...';
+  showProgress('Generating '+row.vin+'...');
+  progressStage('Sending request...',12);
   fetch('/api/generate',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({format:row.format,vins:[row.vin],records:RECORDS,manual:row.manual||{}})
   })
   .then(function(r){
-    if(!r.ok) return r.json().then(function(e){throw new Error(e.error||'Failed');});
+    if(!r.ok) return parseJsonSafe(r).then(function(e){throw new Error((e && e.error) ? e.error : ('HTTP '+r.status));});
+    progressStage('Building PDF on server...',72);
     var cd=r.headers.get('content-disposition')||'';
     var m=cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
     var fn=m?m[1].replace(/['"]/g,''):row.vin+'.pdf';
     return r.blob().then(function(b){return{blob:b,fname:fn};});
   })
   .then(function(res){
-    pt.textContent='Done!'; setTimeout(function(){pt.classList.add('hidden');},2000);
+    progressStage('Downloading file...',92);
     var url=URL.createObjectURL(res.blob);
     var a=document.createElement('a'); a.href=url; a.download=res.fname;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    finishProgress('Download complete');
     toast(res.fname+' downloaded','ok');
   })
   .catch(function(e){
-    pt.classList.add('hidden');
+    failProgress(e.message||'Error');
     var msg = e.message||'Unknown error';
-    if(msg.indexOf('Server busy')>=0){toast('Server busy — wait a few seconds','err');return;}
+    if(msg.indexOf('Server busy')>=0){toast('Server busy - wait a few seconds','err');return;}
     if(msg.indexOf('fetch')>=0||msg.indexOf('network')>=0||msg.toLowerCase().indexOf('failed')>=0){
-      msg = 'Connection error — is python app.py running? Is pdftk installed?';
+      msg = 'Connection error - is python app.py running? Is pdftk installed?';
     }
     toast('Error: '+msg,'err');
   });
 }
 
-/* ── Bulk downloads ───────────────────────────────────── */
+/*  Bulk downloads  */
 function downloadSelected(mode){
   var visible=getVisibleRows();
   var rows=visible.filter(function(v){return v.row.checked;}).map(function(v){return v.row;});
@@ -999,7 +1084,7 @@ function checkManualAndDownload(rows, mode){
   }
 }
 
-/* ── Manual fields modal ──────────────────────────────── */
+/*  Manual fields modal  */
 var modalCallback=null, modalRows=null;
 
 function openManualModal(mode, rows, cb){
@@ -1011,7 +1096,7 @@ function openManualModal(mode, rows, cb){
     if(flds.length&&!fmtsNeedManual[r.format]) fmtsNeedManual[r.format]=flds;
   });
 
-  var titles={'single':'Manual Fields — '+rows[0].format,'individual':'Manual Fields — Selected VINs','all-merged':'Manual Fields — All Formats'};
+  var titles={'single':'Manual Fields - '+rows[0].format,'individual':'Manual Fields - Selected VINs','all-merged':'Manual Fields - All Formats'};
   document.getElementById('modal-ttl').textContent=titles[mode]||'Manual Fields';
 
   var html='';
@@ -1022,7 +1107,7 @@ function openManualModal(mode, rows, cb){
       if(fd.type.indexOf('select:')===0){
         var opts=fd.type.replace('select:','').split(',');
         html+='<div class="field-g"><label class="field-lbl">'+fd.label+' <span class="field-opt">optional</span></label>'
-             +'<select class="field-sel" id="mf-'+fmt+'-'+fd.key+'"><option value="">— leave blank —</option>';
+             +'<select class="field-sel" id="mf-'+fmt+'-'+fd.key+'"><option value="">- leave blank -</option>';
         opts.forEach(function(o){html+='<option>'+o+'</option>';});
         html+='</select></div>';
       } else {
@@ -1060,15 +1145,14 @@ function confirmModal(){
   if(modalCallback) modalCallback();
 }
 
-/* ── Download execution ───────────────────────────────── */
+/*  Download execution  */
 function doDownloadRows(rows){
   doDownload(rows,'individual');
 }
 
 function doDownload(rows, mode){
-  var pt=document.getElementById('prog-txt');
-  pt.classList.remove('hidden');
-  pt.textContent='Generating...';
+  showProgress('Generating '+rows.length+' file(s)...');
+  progressStage('Sending request...',12);
 
   var items=rows.map(function(r){
     return {vin:r.vin,format:r.format,manual:r.manual||{}};
@@ -1080,33 +1164,34 @@ function doDownload(rows, mode){
     body:JSON.stringify({items:items,mode:mode,records:RECORDS})
   })
   .then(function(r){
-    if(!r.ok) return r.json().then(function(e){throw new Error(e.error||'Failed');});
+    if(!r.ok) return parseJsonSafe(r).then(function(e){throw new Error((e && e.error) ? e.error : ('HTTP '+r.status));});
+    progressStage('Building archive on server...',72);
     var cd=r.headers.get('content-disposition')||'';
     var m=cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
     var fn=m?m[1].replace(/['"]/g,''):'VLDR_export.zip';
     return r.blob().then(function(b){return{blob:b,fname:fn};});
   })
   .then(function(res){
-    pt.textContent='Done!';
-    setTimeout(function(){pt.classList.add('hidden');},2500);
+    progressStage('Downloading archive...',92);
     var url=URL.createObjectURL(res.blob);
     var a=document.createElement('a'); a.href=url; a.download=res.fname;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    finishProgress('Download complete');
     toast(res.fname+' downloaded','ok');
   })
   .catch(function(e){
-    pt.classList.add('hidden');
+    failProgress(e.message||'Error');
     var msg = e.message||'Unknown error';
-    if(msg.indexOf('Server busy')>=0){toast('Server busy — wait a few seconds','err');return;}
+    if(msg.indexOf('Server busy')>=0){toast('Server busy - wait a few seconds','err');return;}
     if(msg.indexOf('fetch')>=0||msg.indexOf('network')>=0||msg.toLowerCase().indexOf('failed')>=0){
-      msg = 'Connection error — is python app.py running? Is pdftk installed?';
+      msg = 'Connection error - is python app.py running? Is pdftk installed?';
     }
     toast('Error: '+msg,'err');
   });
 }
 
-/* ── Toast ────────────────────────────────────────────── */
+/*  Toast  */
 function toast(msg,type){
   type=type||'info';
   var colors={ok:'var(--green)',err:'var(--red)',info:'var(--accent-h)'};
@@ -1120,3 +1205,6 @@ function toast(msg,type){
 </script>
 </body>
 </html>
+
+
+

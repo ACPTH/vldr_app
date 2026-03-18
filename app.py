@@ -1,4 +1,4 @@
-"""
+﻿"""
 VLDR Generator - Flask Backend
 Run: python app.py  |  Open: http://localhost:5050
 Place PDF templates in ./templates/ folder (same directory as app.py)
@@ -7,6 +7,7 @@ import os, io, zipfile, json, base64, time, threading, hashlib
 from collections import deque, OrderedDict
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
+from werkzeug.exceptions import HTTPException
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, create_string_object, DictionaryObject
 import pandas as pd
@@ -31,6 +32,17 @@ _queued_jobs = 0
 _recent_times = deque(maxlen=30)
 MAX_CACHE = int(os.environ.get('VLDR_CACHE_MAX', '200'))
 _pdf_cache = OrderedDict()  # key -> bytes
+
+@app.errorhandler(Exception)
+def handle_any_exception(e):
+    """Ensure API endpoints always return JSON, never HTML error pages."""
+    if request.path.startswith('/api/'):
+        if isinstance(e, HTTPException):
+            return jsonify({'error': e.description or str(e)}), e.code or 500
+        return jsonify({'error': str(e)}), 500
+    if isinstance(e, HTTPException):
+        return e
+    return 'Internal Server Error', 500
 
 def _start_job_or_queue():
     """Acquire a job slot. Wait up to QUEUE_TIMEOUT. Returns (ok, waited_sec)."""
@@ -158,7 +170,7 @@ MANUAL_FIELDS = {
                    ('Vessel',           'Transport Ref / Vessel',          'text')],
 }
 
-# ── Helpers ──────────────────────────────────────────────
+#  Helpers 
 def s(v):
     if v is None: return ''
     t = str(v).strip()
@@ -401,12 +413,12 @@ def fill_pdf_and_overlay_comb(template_path, field_data, font_sizes, comb_skip=N
 def remark_join(records):
     return ' | '.join(s(r.get('damage_remark','')) for r in records if s(r.get('damage_remark','')))
 
-# ── Builders ─────────────────────────────────────────────
+#  Builders 
 def build_BMW(vin, records, manual):
     f = records[0]
     dp = s(f.get('date','')).split('-')
     yr,mo,dy = (dp+['','',''])[:3]
-    flds = {'Vin':s(vin),'Dia':dy,'Mes':mo,'Ano':yr,'Año':yr,
+    flds = {'Vin':s(vin),'Dia':dy,'Mes':mo,'Ano':yr,'A\u00f1o':yr,
             'Vessel':s(manual.get('Vessel','')),'Remark':remark_join(records)}
     for i,r in enumerate(records[:4]):
         sfx=['','2','3','4'][i]
@@ -557,7 +569,7 @@ def make_individual_zip(fmt, target_vins, vin_groups, manual):
     zip_buf.seek(0)
     return zip_buf
 
-# ── Routes ───────────────────────────────────────────────
+#  Routes 
 @app.route('/login')
 def login_page():
     if 'uid' in session:
@@ -601,7 +613,7 @@ def get_manual_fields_all():
 
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ok, msg = do_login(data.get('username',''), data.get('password',''))
     return jsonify({'ok': ok, 'error': msg if not ok else None})
 
@@ -635,7 +647,7 @@ def admin_list_users():
 @app.route('/api/admin/users', methods=['POST'])
 @admin_required
 def admin_create_user():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     ok, msg = create_user(data.get('username',''), data.get('password',''),
                           data.get('role','user'), data.get('allowed_formats','*'))
     if ok:
@@ -645,12 +657,12 @@ def admin_create_user():
 @app.route('/api/admin/users/<int:uid>', methods=['PUT'])
 @admin_required
 def admin_update_user(uid):
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     # Prevent admin from removing their own format access
     cu = current_user()
     if cu.get('uid') == uid and cu.get('role') == 'admin' and 'allowed_formats' in data:
         return jsonify({'ok': False, 'error': 'You cannot change your own format access.'}), 400
-    ok, msg = update_user(uid, request.json or {})
+    ok, msg = update_user(uid, data)
     return jsonify({'ok': ok, 'message': msg})
 
 @app.route('/api/admin/users/<int:uid>', methods=['DELETE'])
@@ -659,7 +671,7 @@ def admin_delete_user(uid):
     delete_user(uid)
     return jsonify({'ok': True})
 
-# ── Column mappings for different Excel formats ──────────
+#  Column mappings for different Excel formats 
 EXCEL_FORMATS = {
     'internal': {
         'vin':'vin','make':'make','model':'model','date':'date',
@@ -721,7 +733,7 @@ def parse_excel():
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Single format, merged PDF (all VINs in one file)."""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS: return jsonify({'error':'Unknown format: '+fmt}), 400
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
@@ -752,7 +764,7 @@ def generate():
 @app.route('/api/generate-individual', methods=['POST'])
 def generate_individual():
     """Single format, ZIP with one PDF per VIN named by VIN."""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS: return jsonify({'error':'Unknown format: '+fmt}), 400
     if not is_format_allowed(fmt): return jsonify({'error':'Format not allowed for this user'}), 403
@@ -777,8 +789,8 @@ def generate_individual():
 
 @app.route('/api/generate-all', methods=['POST'])
 def generate_all():
-    """All formats, merged — ZIP with one merged PDF per format."""
-    data    = request.json
+    """All formats, merged  ZIP with one merged PDF per format."""
+    data = request.get_json(silent=True) or {}
     manuals = data.get('manuals', {})
     recs    = filter_damage_records(data.get('records',[]))
     vg      = group_by_vin(recs)
@@ -805,8 +817,8 @@ def generate_all():
 
 @app.route('/api/generate-all-individual', methods=['POST'])
 def generate_all_individual():
-    """All formats, individual — ZIP/{fmt}/VLDR_{fmt}_{VIN}.pdf"""
-    data    = request.json
+    """All formats, individual  ZIP/{fmt}/VLDR_{fmt}_{VIN}.pdf"""
+    data = request.get_json(silent=True) or {}
     manuals = data.get('manuals', {})
     recs    = filter_damage_records(data.get('records',[]))
     vg      = group_by_vin(recs)
@@ -839,7 +851,7 @@ def generate_all_individual():
 @app.route('/api/preview', methods=['POST'])
 def preview():
     """Generate a single-page PDF preview for one VIN in one format."""
-    data   = request.json
+    data = request.get_json(silent=True) or {}
     fmt    = data.get('format', '').upper()
     vin    = data.get('vin', '')
     recs   = data.get('records', [])
@@ -883,7 +895,7 @@ def generate_batch():
           'individual' -> ZIP with one PDF per VIN named VLDR_{fmt}_{VIN}.pdf
           'all-merged' -> ZIP with one merged PDF per format
     """
-    data   = request.json
+    data = request.get_json(silent=True) or {}
     items  = data.get('items', [])   # [{vin, format, manual}]
     mode   = data.get('mode', 'individual')
     recs   = filter_damage_records(data.get('records', []))
@@ -979,7 +991,7 @@ if __name__ == '__main__':
 
     import os as _os
     port = int(_os.environ.get('PORT', 5050))
-    is_local = port == 5050
+    is_local = port == 5050 and os.environ.get('NO_BROWSER', '0') != '1'
 
     if is_local:
         import threading, webbrowser
@@ -990,3 +1002,11 @@ if __name__ == '__main__':
         threading.Thread(target=open_browser, daemon=True).start()
 
     app.run(debug=False, port=port, host='0.0.0.0')
+
+
+
+
+
+
+
+

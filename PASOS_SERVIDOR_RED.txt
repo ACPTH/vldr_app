@@ -1,0 +1,26 @@
+﻿VLDR - Configuracion para servidor de red local
+
+Carpeta base:
+C:\Users\abelc\OneDrive\Escritorio\Server\vldr_app
+
+Archivos creados:
+- 00_instalar_servidor.bat
+- 01_abrir_firewall_5050.bat
+- 02_iniciar_servidor_red.bat
+- 03_activar_inicio_automatico.bat
+- 03b_desactivar_inicio_automatico.bat
+
+Orden recomendado (primera vez):
+1) Ejecutar 00_instalar_servidor.bat
+2) Ejecutar 01_abrir_firewall_5050.bat como administrador
+3) Ejecutar 02_iniciar_servidor_red.bat
+4) Desde otro PC abrir: http://NOMBRE_PC:5050 o http://IP_DEL_PC:5050
+5) Opcional: ejecutar 03_activar_inicio_automatico.bat para autoarranque al iniciar sesion
+
+Comprobar IP del servidor:
+- Abrir PowerShell en el PC servidor y ejecutar: ipconfig
+- Usar la IPv4 de la tarjeta activa
+
+Notas:
+- El servidor funciona mientras el PC este encendido y con sesion iniciada.
+- Si cambias de red, la IP puede cambiar. Mejor usar nombre del equipo si resuelve en tu LAN.
