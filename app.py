@@ -93,7 +93,7 @@ def filter_damage_records(records):
         if not r: continue
         p = r.get('damage_part_code', '')
         t = r.get('damage_type_code', '')
-        e = r.get('damage_extent_code', '')
+        e = r.get('damage_extent', '') or r.get('damage_extent_code', '')
         c = r.get('damage_classification', '')
         if _is_empty_damage(p) and _is_empty_damage(t) and _is_empty_damage(e) and _is_empty_damage(c):
             continue
@@ -469,6 +469,7 @@ def bootstrap_jobs():
 # Auth - import after BASE_DIR is defined
 from auth import init_db, do_login, do_logout, current_user
 from auth import login_required, admin_required, get_all_users, create_user, update_user, delete_user
+from auth import get_brand_format_map, save_brand_format_map
 
 TEMPLATE_FILES = {
     'BMW':        'BMW_VLDR.PDF',
@@ -844,7 +845,7 @@ def build_STELLANTIS(vin, records, manual):
         cls  = s(r.get('damage_classification',''))
         part = s(r['damage_part_code'])
         typ  = s(r['damage_type_code'])
-        size = s(r['damage_extent_code'])
+        size = s(r.get('damage_extent',''))
         rmk  = s(r.get('damage_remark',''))
         # Build: Part/Type/Size - Remark
         entry = ' '.join(filter(None,[part,typ,size]))
@@ -861,7 +862,7 @@ def build_STELLANTIS(vin, records, manual):
         flds['Part'+str(i)]=s(r['damage_part_code'])
         flds['Damage'+str(i)]=s(r['damage_type_code'])
         flds['Grid'+str(i)]=''   # do NOT write classification in LD column
-        flds['Size'+str(i)]=s(r['damage_extent_code'])
+        flds['Size'+str(i)]=s(r.get('damage_extent',''))
     return flds
 
 def build_VGED(vin, records, manual):
@@ -888,6 +889,7 @@ def build_VOLVO(vin, records, manual):
 BUILDERS = {'BMW':build_BMW,'ECG':build_ECG,'FCA':build_FCA,'FORD':build_FORD,
             'LINKCO':build_LINKCO,'RENAULT':build_RENAULT,'STELLANTIS':build_STELLANTIS,
             'VGED':build_VGED,'VOLVO':build_VOLVO}
+FORMATS_ALL = ['BMW','ECG','FCA','FORD','LINKCO','RENAULT','STELLANTIS','VGED','VOLVO']
 
 bootstrap_jobs()
 
@@ -1022,12 +1024,27 @@ def admin_delete_user(uid):
     delete_user(uid)
     return jsonify({'ok': True})
 
+@app.route('/api/settings/brand-format-map', methods=['GET'])
+@login_required
+def get_brand_map():
+    return jsonify({'map': get_brand_format_map(), 'formats': FORMATS_ALL})
+
+@app.route('/api/admin/settings/brand-format-map', methods=['PUT'])
+@admin_required
+def update_brand_map():
+    data = request.get_json(silent=True) or {}
+    ok, msg = save_brand_format_map(data.get('map', {}))
+    if not ok:
+        return jsonify({'ok': False, 'error': msg}), 400
+    return jsonify({'ok': True, 'message': msg, 'map': get_brand_format_map()})
+
 #  Column mappings for different Excel formats 
 EXCEL_FORMATS = {
     'internal': {
         'vin':'vin','make':'make','model':'model','date':'date',
         'location':'location','surveyor':'surveyor',
         'damage_part_code':'damage_part_code','damage_type_code':'damage_type_code',
+        'damage_extent':'damage_extent',
         'damage_extent_code':'damage_extent_code','damage_classification':'damage_classification',
         'damage_remark':'damage_remark',
     },
@@ -1035,12 +1052,13 @@ EXCEL_FORMATS = {
         'vehicle_vin':'vin','vehicle_make':'make','vehicle_model':'model',
         'transport_date':'date','location':'location','overland_transporter':'surveyor',
         'damage_part_code':'damage_part_code','damage_type_code':'damage_type_code',
+        'damage_extent':'damage_extent',
         'damage_extent_code':'damage_extent_code','damage_classification':'damage_classification',
         'remark':'damage_remark',
     },
 }
 INTERNAL_COLS = ['vin','make','model','date','location','surveyor',
-                 'damage_part_code','damage_type_code','damage_extent_code',
+                 'damage_part_code','damage_type_code','damage_extent','damage_extent_code',
                  'damage_classification','damage_remark']
 
 def detect_excel_format(columns):

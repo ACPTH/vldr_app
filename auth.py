@@ -2,7 +2,7 @@
 auth.py - User authentication for VLDR Generator
 SQLite or Postgres (Supabase) + Flask sessions.
 """
-import sqlite3, hashlib, secrets, os
+import sqlite3, hashlib, secrets, os, json
 from functools import wraps
 from flask import session, redirect, request, jsonify
 
@@ -15,6 +15,18 @@ except Exception:
 DB_PATH = os.environ.get('VLDR_DB_PATH') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'users.db')
 DB_URL  = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
 DB_DIALECT = 'postgres' if DB_URL else 'sqlite'
+FORMATS_ALL = ['BMW','ECG','FCA','FORD','LINKCO','RENAULT','STELLANTIS','VGED','VOLVO']
+DEFAULT_BRAND_FORMAT_MAP = {
+    'bmw':'BMW','mini':'BMW',
+    'peugeot':'STELLANTIS','citroen':'STELLANTIS','citron':'STELLANTIS','opel':'STELLANTIS','vauxhall':'STELLANTIS',
+    'fiat':'FCA','alfa romeo':'FCA','alfa':'FCA','jeep':'FCA','chrysler':'FCA','dodge':'FCA','maserati':'FCA','abarth':'FCA',
+    'renault':'RENAULT','dacia':'RENAULT','nissan':'ECG',
+    'ford':'FORD','lincoln':'FORD',
+    'volkswagen':'ECG','vw':'ECG','audi':'ECG','skoda':'VGED','seat':'VGED','cupra':'VGED','porsche':'VGED',
+    'volvo':'VOLVO',
+    'polestar':'LINKCO','lynk':'LINKCO','lynk & co':'LINKCO','lynk&co':'LINKCO',
+    'mazda':'ECG','jaguar':'ECG','land rover':'ECG',
+}
 
 def _connect():
     if DB_DIALECT == 'postgres':
@@ -42,6 +54,14 @@ def init_db():
         )''')
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_formats TEXT DEFAULT '*'")
         cur.execute("UPDATE users SET allowed_formats='*' WHERE allowed_formats IS NULL")
+        cur.execute('''CREATE TABLE IF NOT EXISTS app_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )''')
+        cur.execute(
+            "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+            ('brand_format_map', json.dumps(DEFAULT_BRAND_FORMAT_MAP, ensure_ascii=False))
+        )
     else:
         cur.execute('''CREATE TABLE IF NOT EXISTS users (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +78,14 @@ def init_db():
         if 'allowed_formats' not in cols:
             cur.execute("ALTER TABLE users ADD COLUMN allowed_formats TEXT DEFAULT '*'")
             cur.execute("UPDATE users SET allowed_formats='*' WHERE allowed_formats IS NULL")
+        cur.execute('''CREATE TABLE IF NOT EXISTS app_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )''')
+        cur.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+            ('brand_format_map', json.dumps(DEFAULT_BRAND_FORMAT_MAP, ensure_ascii=False))
+        )
     con.commit()
     cur.execute('SELECT COUNT(*) FROM users')
     if cur.fetchone()[0] == 0:
@@ -215,6 +243,60 @@ def delete_user(uid):
     else:
         cur.execute('DELETE FROM users WHERE id=? AND username != ?', (uid, 'admin'))
     con.commit(); cur.close(); con.close()
+
+def _sanitize_brand_format_map(data):
+    out = {}
+    if not isinstance(data, dict):
+        return out
+    for k, v in data.items():
+        key = str(k or '').strip().lower()
+        fmt = str(v or '').strip().upper()
+        if not key or fmt not in FORMATS_ALL:
+            continue
+        out[key] = fmt
+    return out
+
+def get_brand_format_map():
+    con = _connect()
+    cur = con.cursor()
+    if DB_DIALECT == 'postgres':
+        cur.execute('SELECT value FROM app_settings WHERE key=%s', ('brand_format_map',))
+    else:
+        cur.execute('SELECT value FROM app_settings WHERE key=?', ('brand_format_map',))
+    row = cur.fetchone()
+    cur.close(); con.close()
+    if not row or not row[0]:
+        return dict(DEFAULT_BRAND_FORMAT_MAP)
+    try:
+        raw = json.loads(row[0])
+    except Exception:
+        return dict(DEFAULT_BRAND_FORMAT_MAP)
+    merged = dict(DEFAULT_BRAND_FORMAT_MAP)
+    merged.update(_sanitize_brand_format_map(raw))
+    return merged
+
+def save_brand_format_map(data):
+    cleaned = _sanitize_brand_format_map(data)
+    if not cleaned:
+        return False, 'Invalid mapping payload'
+    payload = json.dumps(cleaned, ensure_ascii=False)
+    con = _connect()
+    cur = con.cursor()
+    if DB_DIALECT == 'postgres':
+        cur.execute(
+            '''INSERT INTO app_settings (key, value) VALUES (%s, %s)
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value''',
+            ('brand_format_map', payload)
+        )
+    else:
+        cur.execute(
+            '''INSERT INTO app_settings (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value''',
+            ('brand_format_map', payload)
+        )
+    con.commit()
+    cur.close(); con.close()
+    return True, 'Updated'
 
 # auto-init on import
 try:

@@ -336,17 +336,18 @@ function escHtml(s){
 }
 
 /*  Make -> Format  */
-var MAKE_FMT = {
+var DEFAULT_MAKE_FMT = {
   'bmw':'BMW','mini':'BMW',
   'peugeot':'STELLANTIS','citroen':'STELLANTIS','citron':'STELLANTIS','opel':'STELLANTIS','vauxhall':'STELLANTIS',
   'fiat':'FCA','alfa romeo':'FCA','alfa':'FCA','jeep':'FCA','chrysler':'FCA','dodge':'FCA','maserati':'FCA','abarth':'FCA',
   'renault':'RENAULT','dacia':'RENAULT','nissan':'ECG',
   'ford':'FORD','lincoln':'FORD',
-  'volkswagen':'VGED','vw':'VGED','audi':'VGED','skoda':'VGED','seat':'VGED','cupra':'VGED','porsche':'VGED',
+  'volkswagen':'ECG','vw':'ECG','audi':'ECG','skoda':'VGED','seat':'VGED','cupra':'VGED','porsche':'VGED',
   'volvo':'VOLVO',
   'polestar':'LINKCO','lynk':'LINKCO','lynk & co':'LINKCO','lynk&co':'LINKCO',
   'mazda':'ECG','jaguar':'ECG','land rover':'ECG',
 };
+var MAKE_FMT = Object.assign({}, DEFAULT_MAKE_FMT);
 var FORMATS_ALL = ['BMW','ECG','FCA','FORD','LINKCO','RENAULT','STELLANTIS','VGED','VOLVO'];
 var FORMATS = FORMATS_ALL.slice();
 var ALLOWED_FORMATS = null;
@@ -372,12 +373,26 @@ var progPulseTimer=null, progStatusTimer=null, progValue=0;
 
 /*  Init  */
 window.onload=function(){
+  loadBrandFormatMap();
   loadUser();
   checkServer();
   bindSorting();
   bindFilters();
   document.addEventListener('click', function(){ closeFmtDD(); });
 };
+
+function loadBrandFormatMap(){
+  return fetch('/api/settings/brand-format-map').then(function(r){
+    if(!r.ok) throw new Error('map unavailable');
+    return r.json();
+  }).then(function(d){
+    if(d && d.map && typeof d.map==='object'){
+      MAKE_FMT = d.map;
+    }
+  }).catch(function(){
+    MAKE_FMT = Object.assign({}, DEFAULT_MAKE_FMT);
+  });
+}
 
 function loadUser(){
 fetch('/api/auth/me').then(function(r){

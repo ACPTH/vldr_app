@@ -43,6 +43,8 @@ tr:last-child td{border:none}
 .msg{padding:8px 12px;border-radius:6px;font-size:11px;display:none}
 .msg.ok{background:#eaf7ee;color:var(--green);border:1px solid #a8d5b5;display:block}
 .msg.err{background:#fdf0ee;color:var(--red);border:1px solid #e8b4ae;display:block}
+textarea.map-editor{width:100%;min-height:220px;background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:10px;font-size:12px;font-family:Consolas,monospace;color:var(--text);outline:none;resize:vertical}
+textarea.map-editor:focus{border-color:var(--blue)}
 </style>
 </head>
 <body>
@@ -86,6 +88,20 @@ tr:last-child td{border:none}
         </thead>
         <tbody id="users-tbody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-hdr">Brand -> Format Mapping</div>
+    <div class="card-bdy">
+      <div id="map-msg" class="msg"></div>
+      <div class="field" style="margin-top:8px">
+        <label>One mapping per line (brand=format)</label>
+        <textarea id="brand-map-editor" class="map-editor" placeholder="volkswagen=ECG&#10;seat=VGED"></textarea>
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <button class="btn btn-primary" onclick="saveBrandMap()">Save Mapping</button>
+      </div>
     </div>
   </div>
 </div>
@@ -195,6 +211,50 @@ function doLogout(){
   fetch('/api/auth/logout',{method:'POST'}).then(function(){window.location.href='/login';});
 }
 
+function parseMapFromEditor(){
+  var txt = document.getElementById('brand-map-editor').value || '';
+  var out = {};
+  var lines = txt.split(/\r?\n/);
+  for(var i=0;i<lines.length;i++){
+    var line = lines[i].trim();
+    if(!line || line.charAt(0)==='#') continue;
+    var k = line.indexOf('=');
+    if(k<1) continue;
+    var brand = line.slice(0,k).trim().toLowerCase();
+    var fmt = line.slice(k+1).trim().toUpperCase();
+    if(!brand || FORMATS.indexOf(fmt)<0) continue;
+    out[brand] = fmt;
+  }
+  return out;
+}
+
+function renderMapEditor(mapObj){
+  var keys = Object.keys(mapObj || {}).sort();
+  var lines = [];
+  for(var i=0;i<keys.length;i++){
+    lines.push(keys[i] + '=' + mapObj[keys[i]]);
+  }
+  document.getElementById('brand-map-editor').value = lines.join('\n');
+}
+
+function loadBrandMap(){
+  fetch('/api/settings/brand-format-map').then(function(r){return r.json();}).then(function(d){
+    if(d && d.map) renderMapEditor(d.map);
+  });
+}
+
+function saveBrandMap(){
+  var map = parseMapFromEditor();
+  fetch('/api/admin/settings/brand-format-map',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({map:map})})
+  .then(function(r){return r.json();}).then(function(d){
+    showMsg('map-msg', !!d.ok, d.message||d.error||'Saved');
+    if(d && d.map) renderMapEditor(d.map);
+  }).catch(function(){
+    showMsg('map-msg', false, 'Save failed');
+  });
+}
+
 function formatCell(u, isSelf){
   var all = (!u.allowed_formats || !u.allowed_formats.length);
   var disabled = (isSelf && u.role==='admin') ? ' disabled' : '';
@@ -247,6 +307,7 @@ function wireFormatRows(){
 fetch('/api/auth/me').then(function(r){return r.json();}).then(function(u){
   if(u && u.uid) CURRENT_UID=u.uid;
   loadUsers();
+  loadBrandMap();
 });
 initFormatCheckboxes();
 </script>
