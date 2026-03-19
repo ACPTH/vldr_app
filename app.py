@@ -3,7 +3,7 @@ VLDR Generator - Flask Backend
 Run: python app.py  |  Open: http://localhost:5050
 Place PDF templates in ./templates/ folder (same directory as app.py)
 """
-import os, io, zipfile, json, base64, time, threading, hashlib, tempfile, sqlite3, uuid, traceback
+import os, io, zipfile, json, base64, time, threading, hashlib, tempfile, sqlite3, uuid, traceback, subprocess, shutil
 from collections import deque, OrderedDict
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
@@ -38,6 +38,8 @@ _pdf_cache = OrderedDict()  # key -> bytes
 SPOOL_MAX_MB = int(os.environ.get('VLDR_SPOOL_MB', '16'))
 JOB_POLL_SEC = float(os.environ.get('VLDR_JOB_POLL_SEC', '1.2'))
 JOB_BATCH_SIZE = int(os.environ.get('VLDR_JOB_BATCH_SIZE', '5'))
+PDF_COMPRESS_ENABLED = os.environ.get('VLDR_PDF_COMPRESS', '1') != '0'
+PDF_COMPRESS_MODE = (os.environ.get('VLDR_PDF_COMPRESS_MODE', 'lossless') or 'lossless').strip().lower()
 
 @app.errorhandler(Exception)
 def handle_any_exception(e):
@@ -135,6 +137,113 @@ def get_uncached_flat(fmt, vin, records, manual):
 def _spooled_buffer():
     """In-memory buffer that spills to disk after threshold."""
     return tempfile.SpooledTemporaryFile(max_size=SPOOL_MAX_MB * 1024 * 1024, mode='w+b')
+
+def _read_all_bytes(buf):
+    try:
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b''
+
+def _find_gs_binary():
+    # Windows common names + unix
+    for cmd in ('gs', 'gswin64c', 'gswin32c'):
+        p = shutil.which(cmd)
+        if p:
+            return p
+    return None
+
+def _ghostscript_compress(raw_pdf_bytes):
+    """
+    Lossy compression with Ghostscript for aggressive size reduction.
+    Falls back to original on any issue.
+    """
+    gs_bin = _find_gs_binary()
+    if not gs_bin:
+        return raw_pdf_bytes
+    preset = '/ebook' if PDF_COMPRESS_MODE == 'balanced' else '/screen'
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as in_f:
+        in_f.write(raw_pdf_bytes)
+        in_path = in_f.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as out_f:
+        out_path = out_f.name
+    try:
+        cmd = [
+            gs_bin,
+            '-sDEVICE=pdfwrite',
+            '-dCompatibilityLevel=1.4',
+            f'-dPDFSETTINGS={preset}',
+            '-dNOPAUSE',
+            '-dQUIET',
+            '-dBATCH',
+            '-dDetectDuplicateImages=true',
+            '-dCompressFonts=true',
+            '-dSubsetFonts=true',
+            '-dDownsampleColorImages=true',
+            '-dColorImageDownsampleType=/Bicubic',
+            '-dColorImageResolution=150' if PDF_COMPRESS_MODE == 'balanced' else '-dColorImageResolution=110',
+            '-dDownsampleGrayImages=true',
+            '-dGrayImageDownsampleType=/Bicubic',
+            '-dGrayImageResolution=150' if PDF_COMPRESS_MODE == 'balanced' else '-dGrayImageResolution=110',
+            '-dDownsampleMonoImages=true',
+            '-dMonoImageResolution=300' if PDF_COMPRESS_MODE == 'balanced' else '-dMonoImageResolution=220',
+            f'-sOutputFile={out_path}',
+            in_path
+        ]
+        proc = subprocess.run(cmd, capture_output=True, check=False)
+        if proc.returncode != 0 or (not os.path.exists(out_path)):
+            return raw_pdf_bytes
+        with open(out_path, 'rb') as fh:
+            out = fh.read()
+        if not out:
+            return raw_pdf_bytes
+        return out
+    except Exception:
+        return raw_pdf_bytes
+    finally:
+        try:
+            if os.path.exists(in_path):
+                os.remove(in_path)
+        except Exception:
+            pass
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception:
+            pass
+
+def compress_pdf_lossless(pdf_buf):
+    """Conservative compression with safe fallback. Can use Ghostscript in balanced/strong modes."""
+    raw = _read_all_bytes(pdf_buf)
+    if not raw:
+        return io.BytesIO()
+    if not PDF_COMPRESS_ENABLED:
+        return io.BytesIO(raw)
+    try:
+        reader = PdfReader(io.BytesIO(raw))
+        writer = PdfWriter()
+        writer.append(reader)
+        for page in writer.pages:
+            if hasattr(page, 'compress_content_streams'):
+                try:
+                    page.compress_content_streams()
+                except Exception:
+                    pass
+        out = io.BytesIO()
+        writer.write(out)
+        out.seek(0)
+        compressed = out.getvalue()
+        if not compressed or len(compressed) > len(raw):
+            best = raw
+        else:
+            best = compressed
+        if PDF_COMPRESS_MODE in ('balanced', 'strong'):
+            gs_out = _ghostscript_compress(best)
+            if gs_out and len(gs_out) < len(best):
+                best = gs_out
+        return io.BytesIO(best)
+    except Exception:
+        return io.BytesIO(raw)
 
 def _jobs_connect():
     con = sqlite3.connect(os.path.join(os.path.dirname(DB_PATH_ENV), 'jobs.db'))
@@ -272,6 +381,7 @@ def process_job(job_id):
                             continue
                         try:
                             flat = get_uncached_flat(fmt, vin, vg[vin], manual)
+                            flat = compress_pdf_lossless(flat)
                             zf.writestr(_safe_vin(vin) + '.pdf', flat.read())
                             written += 1
                         except Exception:
@@ -305,7 +415,7 @@ def process_job(job_id):
                             merged.append(PdfReader(flat))
                         pdf_out = _spooled_buffer()
                         merged.write(pdf_out)
-                        pdf_out.seek(0)
+                        pdf_out = compress_pdf_lossless(pdf_out)
                         zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.read())
                         written += 1
                     except Exception:
@@ -794,6 +904,7 @@ def make_individual_zip(fmt, target_vins, vin_groups, manual):
         for vin in target_vins:
             if vin not in vin_groups: continue
             flat = get_cached_flat(fmt, vin, vin_groups[vin], manual)
+            flat = compress_pdf_lossless(flat)
             safe = vin.replace('/','_').replace('\\','_')
             zf.writestr(safe+'.pdf', flat.read())
     zip_buf.seek(0)
@@ -981,6 +1092,7 @@ def generate():
             buf = make_merged_pdf(fmt, target, vg, data.get('manual',{}))
         except Exception as e:
             return jsonify({'error':str(e)}), 500
+        buf = compress_pdf_lossless(buf)
         if len(target) == 1:
             safe_vin = target[0].replace('/', '_').replace('\\', '_')
             fname = safe_vin + '.pdf'
@@ -1036,6 +1148,7 @@ def generate_all():
                 if not is_format_allowed(fmt): continue
                 try:
                     buf = make_merged_pdf(fmt, target, vg, manuals.get(fmt,{}))
+                    buf = compress_pdf_lossless(buf)
                     zf.writestr('VLDR_'+fmt+'_'+str(len(target))+'vins.pdf', buf.read())  # format-level file, VIN inside
                 except Exception:
                     pass
@@ -1068,6 +1181,7 @@ def generate_all_individual():
                         if vin not in vg: continue
                         # Avoid cache growth during massive all-format exports.
                         flat = get_uncached_flat(fmt, vin, vg[vin], manual)
+                        flat = compress_pdf_lossless(flat)
                         safe = vin.replace('/','_').replace('\\','_')
                         zf.writestr(fmt+'/'+safe+'.pdf', flat.read())  # VIN.pdf only
                 except Exception:
@@ -1150,6 +1264,7 @@ def generate_batch():
                     try:
                         # Batch mode: avoid storing every PDF in LRU cache (OOM on small instances).
                         flat = get_uncached_flat(fmt, vin, vg[vin], manual)  # flatten = non-editable
+                        flat = compress_pdf_lossless(flat)
                         safe = vin.replace('/', '_').replace('\\', '_')
                         zf.writestr(safe + '.pdf', flat.read()) # VIN.pdf only
                     except Exception:
@@ -1187,7 +1302,7 @@ def generate_batch():
                             merged.append(PdfReader(flat))
                         pdf_out = _spooled_buffer()
                         merged.write(pdf_out)
-                        pdf_out.seek(0)
+                        pdf_out = compress_pdf_lossless(pdf_out)
                         zf.writestr('VLDR_' + fmt + '_' + str(len(vins)) + 'vins.pdf', pdf_out.read())
                     except Exception:
                         pass
