@@ -40,6 +40,8 @@ JOB_POLL_SEC = float(os.environ.get('VLDR_JOB_POLL_SEC', '1.2'))
 JOB_BATCH_SIZE = int(os.environ.get('VLDR_JOB_BATCH_SIZE', '5'))
 PDF_COMPRESS_ENABLED = os.environ.get('VLDR_PDF_COMPRESS', '1') != '0'
 PDF_COMPRESS_MODE = (os.environ.get('VLDR_PDF_COMPRESS_MODE', 'lossless') or 'lossless').strip().lower()
+PDF_TARGET_MAX_KB = int(os.environ.get('VLDR_PDF_TARGET_MAX_KB', '400'))
+PDF_TARGET_MAX_BYTES = max(1, PDF_TARGET_MAX_KB) * 1024
 
 @app.errorhandler(Exception)
 def handle_any_exception(e):
@@ -213,11 +215,23 @@ def _ghostscript_compress(raw_pdf_bytes):
             pass
 
 def compress_pdf_lossless(pdf_buf):
-    """Conservative compression with safe fallback. Can use Ghostscript in balanced/strong modes."""
+    """Conservative compression with safe fallback.
+    - lossless: pypdf rewrite/compress only
+    - balanced/strong: Ghostscript only when above size target
+    """
     raw = _read_all_bytes(pdf_buf)
     if not raw:
         return io.BytesIO()
     if not PDF_COMPRESS_ENABLED:
+        return io.BytesIO(raw)
+    mode = PDF_COMPRESS_MODE if PDF_COMPRESS_MODE in ('lossless', 'balanced', 'strong') else 'lossless'
+    if mode in ('balanced', 'strong'):
+        # Speed optimization: skip expensive GS pass for already-small files.
+        if len(raw) <= PDF_TARGET_MAX_BYTES:
+            return io.BytesIO(raw)
+        gs_out = _ghostscript_compress(raw)
+        if gs_out and len(gs_out) < len(raw):
+            return io.BytesIO(gs_out)
         return io.BytesIO(raw)
     try:
         reader = PdfReader(io.BytesIO(raw))
@@ -237,10 +251,6 @@ def compress_pdf_lossless(pdf_buf):
             best = raw
         else:
             best = compressed
-        if PDF_COMPRESS_MODE in ('balanced', 'strong'):
-            gs_out = _ghostscript_compress(best)
-            if gs_out and len(gs_out) < len(best):
-                best = gs_out
         return io.BytesIO(best)
     except Exception:
         return io.BytesIO(raw)
