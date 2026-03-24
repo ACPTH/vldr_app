@@ -1041,7 +1041,7 @@ def update_brand_map():
 #  Column mappings for different Excel formats 
 EXCEL_FORMATS = {
     'internal': {
-        'vin':'vin','make':'make','model':'model','date':'date',
+        'vin':'vin','make':'make','model':'model','date':'date','inspection_date':'date',
         'location':'location','surveyor':'surveyor',
         'damage_part_code':'damage_part_code','damage_type_code':'damage_type_code',
         'damage_extent':'damage_extent',
@@ -1090,7 +1090,11 @@ def parse_excel():
         try:
             df = pd.read_excel(file, sheet_name='damage_list')
         except Exception:
-            return jsonify({'error': 'Sheet "damage_list" not found in Excel file'}), 400
+            try:
+                file.stream.seek(0)
+                df = pd.read_excel(file, sheet_name='inspection_list')
+            except Exception:
+                return jsonify({'error': 'Sheet "damage_list" or "inspection_list" not found in Excel file'}), 400
         fmt = detect_excel_format(df.columns)
         if not fmt:
             return jsonify({'error': 'Unrecognized Excel format. Need: vin (or vehicle_vin), damage_part_code, damage_type_code, damage_extent_code'}), 400
