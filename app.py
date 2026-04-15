@@ -1278,7 +1278,8 @@ def parse_excel():
 @app.route('/api/debug-fields', methods=['POST'])
 @login_required
 def debug_fields():
-    """Temporary debug: returns what the builder would pass to fill_pdf."""
+    """Temporary debug: tests full fill pipeline and reports what happens."""
+    import tempfile, subprocess as sp
     data = request.get_json(silent=True) or {}
     fmt  = data.get('format','').upper()
     if fmt not in BUILDERS:
@@ -1287,19 +1288,51 @@ def debug_fields():
     vg   = group_by_vin(recs)
     target = data.get('vins', []) or list(vg.keys())
     if not vg:
-        return jsonify({'error': 'No records after filter', 'raw_count': len(data.get('records', []))})
-    out = {}
-    for vin in target:
-        if vin not in vg: continue
-        try:
-            fields = BUILDERS[fmt](vin, vg[vin], data.get('manual', {}))
-            out[vin] = {'fields': fields, 'record_count': len(vg[vin]),
-                        'sample_record': vg[vin][0] if vg[vin] else {}}
-        except Exception as e:
-            out[vin] = {'error': str(e)}
-    return jsonify({'format': fmt, 'vins': out,
-                    'raw_record_count': len(data.get('records', [])),
-                    'after_filter_count': len(recs)})
+        return jsonify({'error': 'No records after filter'})
+    vin = target[0]
+    if vin not in vg:
+        return jsonify({'error': 'VIN not in groups'})
+
+    field_data = BUILDERS[fmt](vin, vg[vin], data.get('manual', {}))
+    tpl = get_template(fmt)
+    fsz = FONT_SIZES.get(fmt, {})
+
+    # Test 1: FDF generation
+    fdf_bytes = _make_fdf(field_data)
+
+    # Test 2: pdftk fill_form
+    path_fdf = path_out = None
+    pdftk_ok = False
+    pdftk_err = ''
+    pdftk_size = 0
+    try:
+        fd, path_fdf = tempfile.mkstemp(suffix='.fdf')
+        fd2, path_out = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd); os.close(fd2)
+        with open(path_fdf, 'wb') as f: f.write(fdf_bytes)
+        r = sp.run(['pdftk', tpl, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
+                   capture_output=True)
+        pdftk_ok = r.returncode == 0
+        pdftk_err = r.stderr.decode(errors='replace')
+        if pdftk_ok:
+            pdftk_size = os.path.getsize(path_out)
+    except Exception as e:
+        pdftk_err = str(e)
+    finally:
+        for p in [path_fdf, path_out]:
+            if p:
+                try: os.remove(p)
+                except: pass
+
+    return jsonify({
+        'format': fmt, 'vin': vin,
+        'field_data': field_data,
+        'fdf_preview': fdf_bytes.decode('latin-1', errors='replace')[:500],
+        'pdftk_fill_form_ok': pdftk_ok,
+        'pdftk_fill_form_error': pdftk_err,
+        'pdftk_output_size': pdftk_size,
+        'template_path': tpl,
+    })
 
 @app.route('/api/generate', methods=['POST'])
 def generate():
