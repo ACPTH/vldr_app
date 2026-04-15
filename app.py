@@ -1119,6 +1119,8 @@ def detect_excel_format(columns):
     return None
 
 def normalize_records(df, fmt_name):
+    # Normalise column names: strip spaces + lowercase so matching is case-insensitive
+    df.columns = [str(c).strip().lower() for c in df.columns]
     mapping = EXCEL_FORMATS[fmt_name]
     rename = {src: dst for src, dst in mapping.items() if src in df.columns}
     df = df.rename(columns=rename).copy()
@@ -1129,8 +1131,15 @@ def normalize_records(df, fmt_name):
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
     df = df.where(pd.notna(df), None)
-    return [{k:('' if v is None or str(v) in ('nan','NaT') else str(v))
-             for k,v in r.items()} for r in df.to_dict(orient='records')]
+    records = [{k:('' if v is None or str(v) in ('nan','NaT') else str(v))
+                for k,v in r.items()} for r in df.to_dict(orient='records')]
+    # Cross-fill extent fields: some Excel files use one name, builders may expect the other
+    for r in records:
+        if not r.get('damage_extent_code'):
+            r['damage_extent_code'] = r.get('damage_extent', '')
+        if not r.get('damage_extent'):
+            r['damage_extent'] = r.get('damage_extent_code', '')
+    return records
 
 @app.route('/api/parse-excel', methods=['POST'])
 @login_required
