@@ -4,7 +4,7 @@ SQLite or Postgres (Supabase) + Flask sessions.
 """
 import sqlite3, hashlib, secrets, os, json
 from functools import wraps
-from flask import session, redirect, request, jsonify
+from flask import session, redirect, request, jsonify, url_for
 
 try:
     import psycopg2
@@ -311,7 +311,7 @@ def login_required(f):
         if 'uid' not in session:
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Not authenticated'}), 401
-            return redirect('/login')
+            return redirect(url_for('login_page'))
         return f(*args, **kwargs)
     return decorated
 
@@ -321,10 +321,10 @@ def admin_required(f):
         if 'uid' not in session:
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Not authenticated'}), 401
-            return redirect('/login')
+            return redirect(url_for('login_page'))
         if session.get('role') != 'admin':
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Admin required'}), 403
-            return redirect('/')
+            return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated

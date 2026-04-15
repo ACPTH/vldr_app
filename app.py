@@ -6,7 +6,7 @@ Place PDF templates in ./templates/ folder (same directory as app.py)
 import os, io, zipfile, json, base64, time, threading, hashlib, tempfile, sqlite3, uuid, traceback, subprocess, shutil
 from collections import deque, OrderedDict
 from datetime import timedelta
-from flask import Flask, request, jsonify, send_file, session, redirect
+from flask import Flask, request, jsonify, send_file, session, redirect, url_for
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from pypdf import PdfReader, PdfWriter
@@ -928,7 +928,7 @@ def make_individual_zip(fmt, target_vins, vin_groups, manual):
 @app.route('/login')
 def login_page():
     if 'uid' in session:
-        return redirect('/')
+        return redirect(url_for('index'))
     with open(os.path.join(STATIC_DIR,'login.html'), encoding='utf-8') as f:
         return f.read()
 
