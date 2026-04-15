@@ -621,36 +621,49 @@ def get_template(fmt):
         '\nFiles in templates folder: ' + str(files_in_dir)
     )
 
+def _pdftk_bin():
+    """Return full path to pdftk binary, or None if not found."""
+    # Check common install locations — systemd services often have a restricted PATH
+    for candidate in [
+        shutil.which('pdftk'),
+        '/usr/bin/pdftk',
+        '/usr/local/bin/pdftk',
+        '/snap/bin/pdftk',
+        '/opt/pdftk/bin/pdftk',
+    ]:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
 def flatten_with_pdftk(pdf_buf):
     """Flatten PDF: bake field appearances into page content.
     Prefer real pdftk when available; fallback to pure Python.
     """
-    import tempfile, subprocess
+    pdftk = _pdftk_bin()
     # Try pdftk CLI first (more reliable for Acrobat)
-    try:
-        pdf_buf.seek(0)
-        data = pdf_buf.read()
-        fd_in, path_in = tempfile.mkstemp(suffix='.pdf')
-        fd_out, path_out = tempfile.mkstemp(suffix='.pdf')
-        os.close(fd_in); os.close(fd_out)
-        with open(path_in, 'wb') as f:
-            f.write(data)
-        subprocess.run(['pdftk', path_in, 'output', path_out, 'flatten'],
-                       capture_output=True, check=True)
-        with open(path_out, 'rb') as f:
-            out = io.BytesIO(f.read())
-        out.seek(0)
+    if pdftk:
+        path_in = path_out = None
         try:
-            os.remove(path_in); os.remove(path_out)
+            pdf_buf.seek(0)
+            data = pdf_buf.read()
+            fd_in, path_in = tempfile.mkstemp(suffix='.pdf')
+            fd_out, path_out = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd_in); os.close(fd_out)
+            with open(path_in, 'wb') as f:
+                f.write(data)
+            subprocess.run([pdftk, path_in, 'output', path_out, 'flatten'],
+                           capture_output=True, check=True)
+            with open(path_out, 'rb') as f:
+                out = io.BytesIO(f.read())
+            out.seek(0)
+            return out
         except Exception:
             pass
-        return out
-    except Exception:
-        try:
-            if 'path_in' in locals() and os.path.exists(path_in): os.remove(path_in)
-            if 'path_out' in locals() and os.path.exists(path_out): os.remove(path_out)
-        except Exception:
-            pass
+        finally:
+            for p in [path_in, path_out]:
+                if p:
+                    try: os.remove(p)
+                    except Exception: pass
 
     # Fallback: pure Python flatten (best-effort)
     # Strategy: try /AP appearance stream first; if absent, render /V value directly.
@@ -812,7 +825,9 @@ def _pdftk_fill_form(template_path, field_data, font_sizes):
     If font_sizes needed, pre-patches /DA in a temporary copy of the template first.
     Returns BytesIO or None on failure.
     """
-    import tempfile, subprocess
+    pdftk = _pdftk_bin()
+    if not pdftk:
+        return None
     path_tpl_copy = None
     path_fdf = None
     path_out = None
@@ -850,7 +865,7 @@ def _pdftk_fill_form(template_path, field_data, font_sizes):
         with open(path_fdf, 'wb') as f:
             f.write(fdf_bytes)
         r = subprocess.run(
-            ['pdftk', tpl_to_use, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
+            [pdftk, tpl_to_use, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
             capture_output=True
         )
         if r.returncode != 0:
@@ -1310,7 +1325,11 @@ def debug_fields():
         fd2, path_out = tempfile.mkstemp(suffix='.pdf')
         os.close(fd); os.close(fd2)
         with open(path_fdf, 'wb') as f: f.write(fdf_bytes)
-        r = sp.run(['pdftk', tpl, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
+        _pdftk = _pdftk_bin()
+        pdftk_err = 'pdftk not found' if not _pdftk else ''
+        if not _pdftk:
+            raise FileNotFoundError('pdftk not found in: ' + str([shutil.which('pdftk'),'/usr/bin/pdftk','/usr/local/bin/pdftk']))
+        r = sp.run([_pdftk, tpl, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
                    capture_output=True)
         pdftk_ok = r.returncode == 0
         pdftk_err = r.stderr.decode(errors='replace')
@@ -1645,9 +1664,12 @@ if __name__ == '__main__':
 
     # Check pdftk availability
     import subprocess as _sp
+    _pdftk_path = _pdftk_bin()
     try:
-        _sp.run(['pdftk', '--version'], capture_output=True, check=True)
-        print('  pdftk: found')
+        if not _pdftk_path:
+            raise FileNotFoundError('pdftk not found')
+        _sp.run([_pdftk_path, '--version'], capture_output=True, check=True)
+        print('  pdftk: found at', _pdftk_path)
     except Exception:
         print('  WARNING: pdftk not found! PDF flattening will fail.')
         print('  Install from: https://www.pdflabs.com/tools/pdftk-the-pdf-toolkit/')
