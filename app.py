@@ -8,11 +8,13 @@ from collections import deque, OrderedDict
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, create_string_object, DictionaryObject
 import pandas as pd
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 # SECRET_KEY must be set in environment for production (Render sets it automatically)
 _default_key = 'vldr-local-dev-' + __import__('hashlib').md5(b'vldr').hexdigest()
 app.secret_key = os.environ.get('SECRET_KEY', _default_key)
