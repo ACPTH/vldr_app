@@ -795,9 +795,88 @@ def fill_pdf(template_path, field_data, font_sizes):
     buf.seek(0)
     return buf
 
+def _make_fdf(field_data):
+    """Build minimal FDF bytes so pdftk fill_form can fill a PDF template."""
+    lines = ['%FDF-1.2', '1 0 obj', '<< /FDF << /Fields [']
+    for name, value in field_data.items():
+        if value is None:
+            value = ''
+        ne = str(name).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+        ve = str(value).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+        lines.append('<< /T (' + ne + ') /V (' + ve + ') >>')
+    lines += ['] >> >>', 'endobj', 'trailer', '<< /Root 1 0 R >>', '%%EOF']
+    return ('\n'.join(lines) + '\n').encode('latin-1', errors='replace')
+
+def _pdftk_fill_form(template_path, field_data, font_sizes):
+    """Fill and flatten a PDF using pdftk fill_form + FDF — most reliable with pdftk-java.
+    If font_sizes needed, pre-patches /DA in a temporary copy of the template first.
+    Returns BytesIO or None on failure.
+    """
+    import tempfile, subprocess
+    path_tpl_copy = None
+    path_fdf = None
+    path_out = None
+    try:
+        # If custom font sizes, write a temporary template copy with patched /DA strings
+        if font_sizes:
+            reader = PdfReader(template_path)
+            writer = PdfWriter()
+            writer.append(reader)
+            for page in writer.pages:
+                for ref in page.get('/Annots', []):
+                    obj = ref.get_object()
+                    fn = str(obj.get('/T', ''))
+                    if fn in font_sizes:
+                        da = '/Helvetica ' + str(font_sizes[fn]) + ' Tf 0 g'
+                        if hasattr(ref, 'idnum'):
+                            direct = writer._objects[ref.idnum - 1]
+                            if isinstance(direct, DictionaryObject):
+                                direct[NameObject('/DA')] = create_string_object(da)
+            fd, path_tpl_copy = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd)
+            with open(path_tpl_copy, 'wb') as f:
+                tmp_buf = io.BytesIO()
+                writer.write(tmp_buf)
+                f.write(tmp_buf.getvalue())
+            tpl_to_use = path_tpl_copy
+        else:
+            tpl_to_use = template_path
+
+        fdf_bytes = _make_fdf(field_data)
+        fd, path_fdf = tempfile.mkstemp(suffix='.fdf')
+        os.close(fd)
+        fd, path_out = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd)
+        with open(path_fdf, 'wb') as f:
+            f.write(fdf_bytes)
+        r = subprocess.run(
+            ['pdftk', tpl_to_use, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
+            capture_output=True
+        )
+        if r.returncode != 0:
+            return None
+        with open(path_out, 'rb') as f:
+            out = io.BytesIO(f.read())
+        out.seek(0)
+        return out
+    except Exception:
+        return None
+    finally:
+        for p in [path_tpl_copy, path_fdf, path_out]:
+            if p:
+                try: os.remove(p)
+                except Exception: pass
+
 def fill_pdf_and_overlay_comb(template_path, field_data, font_sizes, comb_skip=None):
     """Fill PDF and add text overlay for comb fields that pdftk drops after flatten."""
     from pypdf.generic import DecodedStreamObject, ArrayObject as ArrObj
+
+    # Primary: pdftk fill_form + FDF (lets pdftk handle its own font resources)
+    result = _pdftk_fill_form(template_path, field_data, font_sizes)
+    if result:
+        return result
+
+    # Fallback: pypdf fill + flatten
     comb_coords = _get_comb_field_coords(template_path)
     buf = fill_pdf(template_path, field_data, font_sizes)
     flat = flatten_with_pdftk(buf)
