@@ -1196,6 +1196,32 @@ def parse_excel():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/debug-fields', methods=['POST'])
+@login_required
+def debug_fields():
+    """Temporary debug: returns what the builder would pass to fill_pdf."""
+    data = request.get_json(silent=True) or {}
+    fmt  = data.get('format','').upper()
+    if fmt not in BUILDERS:
+        return jsonify({'error': 'Unknown format: ' + fmt})
+    recs = filter_damage_records(data.get('records', []))
+    vg   = group_by_vin(recs)
+    target = data.get('vins', []) or list(vg.keys())
+    if not vg:
+        return jsonify({'error': 'No records after filter', 'raw_count': len(data.get('records', []))})
+    out = {}
+    for vin in target:
+        if vin not in vg: continue
+        try:
+            fields = BUILDERS[fmt](vin, vg[vin], data.get('manual', {}))
+            out[vin] = {'fields': fields, 'record_count': len(vg[vin]),
+                        'sample_record': vg[vin][0] if vg[vin] else {}}
+        except Exception as e:
+            out[vin] = {'error': str(e)}
+    return jsonify({'format': fmt, 'vins': out,
+                    'raw_record_count': len(data.get('records', [])),
+                    'after_filter_count': len(recs)})
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Single format, merged PDF (all VINs in one file)."""
