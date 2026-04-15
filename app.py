@@ -621,27 +621,49 @@ def get_template(fmt):
         '\nFiles in templates folder: ' + str(files_in_dir)
     )
 
-def _pdftk_bin():
-    """Return full path to pdftk binary, or None if not found."""
-    # Check common install locations — systemd services often have a restricted PATH
-    for candidate in [
-        shutil.which('pdftk'),
-        '/usr/bin/pdftk',
-        '/usr/local/bin/pdftk',
-        '/snap/bin/pdftk',
-        '/opt/pdftk/bin/pdftk',
-    ]:
-        if candidate and os.path.isfile(candidate):
-            return candidate
+def _pdftk_cmd():
+    """Return pdftk invocation as a list prefix, e.g. ['java','-jar','/path/pdftk.jar']
+    or ['/usr/bin/pdftk'].  Returns None if pdftk is not available.
+    pdftk-java ships as a shell-script wrapper; we prefer calling the JAR directly
+    to avoid '/usr/bin/env sh: not found' errors in restricted subprocess environments.
+    """
+    # 1. Try java -jar (most reliable with pdftk-java on Debian/Ubuntu)
+    java = shutil.which('java') or '/usr/bin/java'
+    if os.path.isfile(java):
+        for jar in [
+            '/usr/share/java/pdftk-all.jar',
+            '/usr/share/pdftk-java/pdftk-all.jar',
+            '/usr/share/java/pdftk.jar',
+        ]:
+            if os.path.isfile(jar):
+                return [java, '-jar', jar]
+
+    # 2. Wrapper script but via explicit shell path
+    for sh in ['/bin/sh', '/bin/bash', '/usr/bin/sh']:
+        if os.path.isfile(sh):
+            for pdftk in ['/usr/bin/pdftk', '/usr/local/bin/pdftk', shutil.which('pdftk')]:
+                if pdftk and os.path.isfile(pdftk):
+                    return [sh, pdftk]
+
+    # 3. Direct binary (works if it's a native ELF, not a shell script)
+    for pdftk in ['/usr/bin/pdftk', '/usr/local/bin/pdftk', shutil.which('pdftk')]:
+        if pdftk and os.path.isfile(pdftk):
+            return [pdftk]
+
     return None
+
+def _pdftk_bin():
+    """Compatibility shim — returns first element of _pdftk_cmd(), or None."""
+    cmd = _pdftk_cmd()
+    return cmd[0] if cmd else None
 
 def flatten_with_pdftk(pdf_buf):
     """Flatten PDF: bake field appearances into page content.
     Prefer real pdftk when available; fallback to pure Python.
     """
-    pdftk = _pdftk_bin()
+    pdftk_cmd = _pdftk_cmd()
     # Try pdftk CLI first (more reliable for Acrobat)
-    if pdftk:
+    if pdftk_cmd:
         path_in = path_out = None
         try:
             pdf_buf.seek(0)
@@ -651,7 +673,7 @@ def flatten_with_pdftk(pdf_buf):
             os.close(fd_in); os.close(fd_out)
             with open(path_in, 'wb') as f:
                 f.write(data)
-            subprocess.run([pdftk, path_in, 'output', path_out, 'flatten'],
+            subprocess.run(pdftk_cmd + [path_in, 'output', path_out, 'flatten'],
                            capture_output=True, check=True)
             with open(path_out, 'rb') as f:
                 out = io.BytesIO(f.read())
@@ -825,8 +847,8 @@ def _pdftk_fill_form(template_path, field_data, font_sizes):
     If font_sizes needed, pre-patches /DA in a temporary copy of the template first.
     Returns BytesIO or None on failure.
     """
-    pdftk = _pdftk_bin()
-    if not pdftk:
+    pdftk_cmd = _pdftk_cmd()
+    if not pdftk_cmd:
         return None
     path_tpl_copy = None
     path_fdf = None
@@ -865,7 +887,7 @@ def _pdftk_fill_form(template_path, field_data, font_sizes):
         with open(path_fdf, 'wb') as f:
             f.write(fdf_bytes)
         r = subprocess.run(
-            [pdftk, tpl_to_use, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
+            pdftk_cmd + [tpl_to_use, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
             capture_output=True
         )
         if r.returncode != 0:
@@ -1325,11 +1347,11 @@ def debug_fields():
         fd2, path_out = tempfile.mkstemp(suffix='.pdf')
         os.close(fd); os.close(fd2)
         with open(path_fdf, 'wb') as f: f.write(fdf_bytes)
-        _pdftk = _pdftk_bin()
-        pdftk_err = 'pdftk not found' if not _pdftk else ''
-        if not _pdftk:
-            raise FileNotFoundError('pdftk not found in: ' + str([shutil.which('pdftk'),'/usr/bin/pdftk','/usr/local/bin/pdftk']))
-        r = sp.run([_pdftk, tpl, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
+        _pdftk_c = _pdftk_cmd()
+        pdftk_err = 'pdftk not found' if not _pdftk_c else ''
+        if not _pdftk_c:
+            raise FileNotFoundError('pdftk not found')
+        r = sp.run(_pdftk_c + [tpl, 'fill_form', path_fdf, 'output', path_out, 'flatten'],
                    capture_output=True)
         pdftk_ok = r.returncode == 0
         pdftk_err = r.stderr.decode(errors='replace')
