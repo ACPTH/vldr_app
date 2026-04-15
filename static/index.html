@@ -145,6 +145,8 @@ iframe{width:100%;height:100%;border:none}
 .field-inp,.field-sel{background:#f8fafc;border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:7px 10px;font-size:12px;outline:none;width:100%;transition:border-color .15s}
 .field-inp:focus,.field-sel:focus{border-color:var(--accent)}.field-sel option{background:var(--surf2)}
 .fmt-sec-hdr{font-size:10px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.08em;padding:8px 10px;background:#1B4F8A;border-radius:5px;margin-bottom:6px}
+.manual-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.manual-grid .full{grid-column:1 / -1}
 
 /* Progress */
 .prog-bar-wrap{height:3px;background:var(--surf3);border-radius:2px;overflow:hidden;margin-top:6px}
@@ -175,6 +177,7 @@ iframe{width:100%;height:100%;border:none}
       <span class="status-txt" id="stxt">Connecting...</span>
       <div style="width:1px;height:18px;background:rgba(255,255,255,.2);margin:0 4px"></div>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-in').click()">Import Excel</button>
+      <button class="btn btn-ghost btn-sm" onclick="openManualEntry()">Manual Entry</button>
       <input type="file" id="file-in" accept=".xlsx,.xlsm,.xls" style="display:none" onchange="importFile(this)">
       <div style="width:1px;height:18px;background:rgba(255,255,255,.2);margin:0 4px"></div>
       <span id="user-badge" style="font-size:10px;color:rgba(255,255,255,.8);display:flex;align-items:center;gap:6px">
@@ -199,6 +202,9 @@ iframe{width:100%;height:100%;border:none}
       <div class="drop-title">Import damage_list.xlsx</div>
       <div class="drop-sub">Click or drag &amp; drop your Excel file</div>
       <div class="drop-hint">Sheet: damage_list &nbsp;|&nbsp; Columns: vin, make, damage_part_code, damage_type_code, damage_extent_code</div>
+      <div style="margin-top:12px">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="event.stopPropagation();openManualEntry()">Create Manually</button>
+      </div>
     </div>
   </div>
 
@@ -327,6 +333,42 @@ iframe{width:100%;height:100%;border:none}
   </div>
 </div>
 
+<!-- MANUAL ENTRY MODAL -->
+<div class="modal-overlay" id="manual-overlay" onclick="if(event.target===this)closeManualEntry()">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-ttl">Manual Entry</div>
+        <div class="modal-sub">Select make and fill fields manually</div>
+      </div>
+      <button class="modal-x" onclick="closeManualEntry()">x</button>
+    </div>
+    <div class="modal-bdy">
+      <div class="manual-grid">
+        <div class="field-g full hidden" id="me-line-wrap"><label class="field-lbl">Manual Line</label><select id="me-line" class="field-sel"></select></div>
+        <div class="field-g"><label class="field-lbl">VIN</label><input id="me-vin" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Make</label><input id="me-make" class="field-inp" list="me-makes" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Model</label><input id="me-model" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Date</label><input id="me-date" class="field-inp" type="date"></div>
+        <div class="field-g"><label class="field-lbl">Location</label><input id="me-location" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Surveyor</label><input id="me-surveyor" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Damage Part Code</label><input id="me-part" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Damage Type Code</label><input id="me-type" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Damage Extent Code</label><input id="me-extent-code" class="field-inp" type="text"></div>
+        <div class="field-g"><label class="field-lbl">Damage Extent</label><input id="me-extent" class="field-inp" type="text"></div>
+        <div class="field-g full"><label class="field-lbl">Damage Classification</label><input id="me-class" class="field-inp" type="text" placeholder="e.g. Damage (Transport)"></div>
+        <div class="field-g full"><label class="field-lbl">Damage Remark</label><input id="me-remark" class="field-inp" type="text"></div>
+      </div>
+      <datalist id="me-makes"></datalist>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeManualEntry()">Cancel</button>
+      <button class="btn btn-ghost" id="me-btn-secondary" onclick="saveManualEntry(true)">Add And Continue</button>
+      <button class="btn btn-accent" id="me-btn-primary" onclick="saveManualEntry(false)">Add And Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="toasts" id="toasts"></div>
 
 <script>
@@ -370,10 +412,12 @@ var activeFilterDD=null; // 'make' | 'class'
 var pendingAction=null;
 var previewVin=null, previewFmt=null, previewPdfUrl=null;
 var progPulseTimer=null, progStatusTimer=null, progValue=0;
+var manualEditMode=false, manualEditVin='', manualEditCurrentId='', manualEditRecords=[];
 
 /*  Init  */
 window.onload=function(){
   loadBrandFormatMap();
+  initManualMakeList();
   loadUser();
   checkServer();
   bindSorting();
@@ -388,9 +432,11 @@ function loadBrandFormatMap(){
   }).then(function(d){
     if(d && d.map && typeof d.map==='object'){
       MAKE_FMT = d.map;
+      initManualMakeList();
     }
   }).catch(function(){
     MAKE_FMT = Object.assign({}, DEFAULT_MAKE_FMT);
+    initManualMakeList();
   });
 }
 
@@ -492,6 +538,165 @@ function processFile(file){
     }).catch(function(e){toast('Error: '+e.message,'err');});
 }
 
+function initManualMakeList(){
+  var dl=document.getElementById('me-makes');
+  if(!dl) return;
+  var keys=Object.keys(MAKE_FMT||{}).sort();
+  dl.innerHTML=keys.map(function(k){return '<option value="'+escHtml(k)+'">';}).join('');
+}
+
+function openManualEntry(){
+  manualEditMode=false; manualEditVin=''; manualEditCurrentId=''; manualEditRecords=[];
+  document.getElementById('me-line-wrap').classList.add('hidden');
+  document.getElementById('me-btn-secondary').textContent='Add And Continue';
+  document.getElementById('me-btn-primary').textContent='Add And Close';
+  document.getElementById('me-vin').removeAttribute('readonly');
+  fillManualForm({vin:'',make:'',model:'',date:'',location:'',surveyor:'',damage_part_code:'',damage_type_code:'',damage_extent_code:'',damage_extent:'',damage_classification:'',damage_remark:''});
+  initManualMakeList();
+  document.getElementById('manual-overlay').classList.add('show');
+}
+
+function closeManualEntry(){
+  manualEditMode=false; manualEditVin=''; manualEditCurrentId=''; manualEditRecords=[];
+  document.getElementById('manual-overlay').classList.remove('show');
+}
+
+function fillManualForm(rec){
+  document.getElementById('me-vin').value=rec.vin||'';
+  document.getElementById('me-make').value=rec.make||'';
+  document.getElementById('me-model').value=rec.model||'';
+  document.getElementById('me-date').value=rec.date||'';
+  document.getElementById('me-location').value=rec.location||'';
+  document.getElementById('me-surveyor').value=rec.surveyor||'';
+  document.getElementById('me-part').value=rec.damage_part_code||'';
+  document.getElementById('me-type').value=rec.damage_type_code||'';
+  document.getElementById('me-extent-code').value=rec.damage_extent_code||'';
+  document.getElementById('me-extent').value=rec.damage_extent||'';
+  document.getElementById('me-class').value=rec.damage_classification||'';
+  document.getElementById('me-remark').value=rec.damage_remark||'';
+}
+
+function openManualEdit(rowIdx){
+  var row=ROWS[rowIdx];
+  if(!row){return;}
+  var lines=(row.records||[]).filter(function(r){return !!r._manual;});
+  if(!lines.length){toast('No manual lines for this VIN','err');return;}
+  manualEditMode=true;
+  manualEditVin=row.vin;
+  manualEditRecords=lines;
+  initManualMakeList();
+  var sel=document.getElementById('me-line');
+  sel.innerHTML=lines.map(function(r,i){
+    var lbl='Line '+(i+1)+' - '+(r.damage_part_code||'-')+'/'+(r.damage_type_code||'-');
+    return '<option value="'+escHtml(r._manual_id||'')+'">'+escHtml(lbl)+'</option>';
+  }).join('');
+  manualEditCurrentId=lines[0]._manual_id||'';
+  document.getElementById('me-line-wrap').classList.remove('hidden');
+  document.getElementById('me-btn-secondary').textContent='Save';
+  document.getElementById('me-btn-primary').textContent='Save And Close';
+  document.getElementById('me-vin').setAttribute('readonly','readonly');
+  fillManualForm(lines[0]);
+  sel.onchange=function(){
+    manualEditCurrentId=sel.value;
+    var rec=manualEditRecords.find(function(r){return (r._manual_id||'')===manualEditCurrentId;});
+    if(rec) fillManualForm(rec);
+  };
+  document.getElementById('manual-overlay').classList.add('show');
+}
+
+function deleteManualRows(rowIdx){
+  var row=ROWS[rowIdx];
+  if(!row){return;}
+  if(!confirm('Delete manual lines for VIN '+row.vin+'?')) return;
+  RECORDS = RECORDS.filter(function(r){ return !(r._manual && r.vin===row.vin); });
+  buildVinGroups();
+  buildRows();
+  renderTable();
+  if(!ROWS.length){
+    document.getElementById('main-content').classList.add('hidden');
+    document.getElementById('drop-wrap').classList.remove('hidden');
+  }
+  toast('Manual lines deleted for '+row.vin,'ok');
+}
+
+function saveManualEntry(keepOpen){
+  var vin=(document.getElementById('me-vin').value||'').trim();
+  var make=(document.getElementById('me-make').value||'').trim();
+  var model=(document.getElementById('me-model').value||'').trim();
+  var date=(document.getElementById('me-date').value||'').trim();
+  var location=(document.getElementById('me-location').value||'').trim();
+  var surveyor=(document.getElementById('me-surveyor').value||'').trim();
+  var part=(document.getElementById('me-part').value||'').trim();
+  var type=(document.getElementById('me-type').value||'').trim();
+  var extentCode=(document.getElementById('me-extent-code').value||'').trim();
+  var extent=(document.getElementById('me-extent').value||'').trim();
+  var cls=(document.getElementById('me-class').value||'').trim();
+  var remark=(document.getElementById('me-remark').value||'').trim();
+
+  if(!vin){toast('VIN is required','err');return;}
+  if(!make){toast('Make is required','err');return;}
+  if(!part && !type && !extentCode && !extent && !cls){
+    toast('Add at least one damage field (part/type/extent/classification)','err');
+    return;
+  }
+
+  if(manualEditMode){
+    var target=RECORDS.find(function(r){
+      return r._manual && (r._manual_id||'')===manualEditCurrentId;
+    });
+    if(!target){toast('Manual line not found','err');return;}
+    target.make=make;
+    target.model=model;
+    target.date=date;
+    target.location=location;
+    target.surveyor=surveyor;
+    target.damage_part_code=part;
+    target.damage_type_code=type;
+    target.damage_extent_code=extentCode || extent;
+    target.damage_extent=extent || extentCode;
+    target.damage_classification=cls;
+    target.damage_remark=remark;
+  } else {
+    var rec={
+      vin:vin,
+      make:make,
+      model:model,
+      date:date,
+      location:location,
+      surveyor:surveyor,
+      damage_part_code:part,
+      damage_type_code:type,
+      damage_extent_code:extentCode || extent,
+      damage_extent:extent || extentCode,
+      damage_classification:cls,
+      damage_remark:remark,
+      _manual:true,
+      _manual_id:'m_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)
+    };
+    RECORDS.push(rec);
+  }
+  buildVinGroups();
+  buildRows();
+  renderTable();
+  document.getElementById('drop-wrap').classList.add('hidden');
+  document.getElementById('main-content').classList.remove('hidden');
+  enableButtons();
+  toast(manualEditMode?('Manual line updated for VIN '+vin):('Manual record added for VIN '+vin),'ok');
+
+  if(keepOpen){
+    if(!manualEditMode){
+      document.getElementById('me-part').value='';
+      document.getElementById('me-type').value='';
+      document.getElementById('me-extent-code').value='';
+      document.getElementById('me-extent').value='';
+      document.getElementById('me-class').value='';
+      document.getElementById('me-remark').value='';
+    }
+    return;
+  }
+  closeManualEntry();
+}
+
 function buildVinGroups(){
   VIN_GROUPS={};
   for(var i=0;i<RECORDS.length;i++){
@@ -510,7 +715,7 @@ function buildRows(){
     rs = rs.filter(function(r){
       var p=(r.damage_part_code||'').toString().trim();
       var t=(r.damage_type_code||'').toString().trim();
-      var e=(r.damage_extent_code||'').toString().trim();
+      var e=(r.damage_extent||r.damage_extent_code||'').toString().trim();
       var c=(r.damage_classification||'').toString().trim();
       var bad=function(x){return !x || x==='-' || x.toLowerCase()==='nan' || x.toLowerCase()==='none';};
       return !(bad(p) && bad(t) && bad(e) && bad(c));
@@ -526,7 +731,7 @@ function buildRows(){
     ROWS.push({
       vin:vin, make:make, model:r0.model||'', records:rs,
       format:detFmt||fallbackFmt, isAuto:!!detFmt, checked:true, manual:{},
-      remark: aggRemark
+      remark: aggRemark, hasManual: rs.some(function(x){return !!x._manual;})
     });
   });
   updateSelCount();
@@ -552,7 +757,7 @@ function renderTable(){
     // Aggregate damages for display
     var parts=row.records.map(function(r){return r.damage_part_code;}).join(', ');
     var types=row.records.map(function(r){return r.damage_type_code;}).join(', ');
-    var extents=row.records.map(function(r){return r.damage_extent_code;}).join(', ');
+    var extents=row.records.map(function(r){return r.damage_extent||r.damage_extent_code;}).join(', ');
     var classes=row.records.map(function(r){
       var cls=CLS_MAP[r.damage_classification||'']||'cls-O';
       return '<span class="cls '+cls+'">'+(r.damage_classification||'')+'</span>';
@@ -580,6 +785,8 @@ function renderTable(){
       +'<td style="white-space:nowrap">'
         +'<button class="btn btn-xs" style="background:#eef4fc;border:1px solid #1B4F8A;color:#1B4F8A;font-weight:600" onclick="previewVinRow('+idx+')">Preview</button>'
         +'<button class="btn btn-accent btn-xs" onclick="downloadRowPDF('+idx+')" style="margin-left:4px">Download</button>'
+        +(row.hasManual?'<button class="btn btn-xs" style="margin-left:4px;background:#fdf6e8;border:1px solid #e8cfa0;color:#b86c00" onclick="openManualEdit('+idx+')">Edit Manual</button>':'')
+        +(row.hasManual?'<button class="btn btn-xs" style="margin-left:4px;background:#fdf0ee;border:1px solid #e8b4ae;color:#c0392b" onclick="deleteManualRows('+idx+')">Delete Manual</button>':'')
       +'</td>'
     +'</tr>';
   }
@@ -643,7 +850,7 @@ function getVisibleRows(){
     else if(SORT.key==='format'){va=ka.format||''; vb=kb.format||'';}
     else if(SORT.key==='part'){va=ka.records.map(function(x){return x.damage_part_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_part_code||'';}).join(' ');}
     else if(SORT.key==='type'){va=ka.records.map(function(x){return x.damage_type_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_type_code||'';}).join(' ');}
-    else if(SORT.key==='extent'){va=ka.records.map(function(x){return x.damage_extent_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_extent_code||'';}).join(' ');}
+    else if(SORT.key==='extent'){va=ka.records.map(function(x){return x.damage_extent||x.damage_extent_code||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_extent||x.damage_extent_code||'';}).join(' ');}
     else if(SORT.key==='classification'){va=ka.records.map(function(x){return x.damage_classification||'';}).join(' '); vb=kb.records.map(function(x){return x.damage_classification||'';}).join(' ');}
     else if(SORT.key==='remark'){va=ka.remark||''; vb=kb.remark||'';}
     if(typeof va==='string') va=va.toLowerCase();
