@@ -9,6 +9,11 @@ from datetime import timedelta
 from flask import Flask, request, jsonify, send_file, session, redirect, url_for
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
+try:
+    from itsdangerous import URLSafeTimedSerializer as _USTS, BadSignature, SignatureExpired
+    _itsdangerous_ok = True
+except ImportError:
+    _itsdangerous_ok = False
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, create_string_object, DictionaryObject
 import pandas as pd
@@ -19,6 +24,49 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 _default_key = 'vldr-local-dev-' + __import__('hashlib').md5(b'vldr').hexdigest()
 app.secret_key = os.environ.get('SECRET_KEY', _default_key)
 app.permanent_session_lifetime = timedelta(hours=8)
+
+# ── Portal SSO ─────────────────────────────────────────────────
+_PORTAL_SECRET = os.environ.get('PORTAL_SECRET', '')
+
+def _verify_portal_token(token):
+    if not _itsdangerous_ok or not _PORTAL_SECRET or not token:
+        return None
+    try:
+        return _USTS(_PORTAL_SECRET).loads(token, max_age=60)
+    except Exception:
+        return None
+
+@app.before_request
+def _portal_sso():
+    token = request.args.get('portal_token')
+    if not token or session.get('uid'):
+        return
+    data = _verify_portal_token(token)
+    if not data:
+        return
+    username = (data.get('u') or '').lower().strip()
+    if not username:
+        return
+    from auth import _connect, DB_DIALECT
+    con = _connect()
+    cur = con.cursor()
+    if DB_DIALECT == 'postgres':
+        cur.execute('SELECT id,role FROM users WHERE username=%s AND active=1', (username,))
+    else:
+        cur.execute('SELECT id,role FROM users WHERE username=? AND active=1', (username,))
+    row = cur.fetchone()
+    cur.close(); con.close()
+    if not row:
+        return
+    uid, role = row
+    session.permanent  = True
+    session['uid']     = uid
+    session['username'] = username
+    session['role']    = role
+    from urllib.parse import urlencode
+    args = {k: v for k, v in request.args.items() if k != 'portal_token'}
+    clean_url = request.path + ('?' + urlencode(args) if args else '')
+    return redirect(clean_url)
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
