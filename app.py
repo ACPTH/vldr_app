@@ -653,7 +653,8 @@ def flatten_with_pdftk(pdf_buf):
             pass
 
     # Fallback: pure Python flatten (best-effort)
-    from pypdf.generic import DecodedStreamObject
+    # Strategy: try /AP appearance stream first; if absent, render /V value directly.
+    from pypdf.generic import DecodedStreamObject, ArrayObject
     pdf_buf.seek(0)
     reader = PdfReader(pdf_buf)
     writer = PdfWriter()
@@ -664,21 +665,52 @@ def flatten_with_pdftk(pdf_buf):
     for ref in annots:
         try:
             obj = ref.get_object()
-            ap = obj.get('/AP')
-            if not ap: continue
-            ap_obj = ap.get_object() if hasattr(ap, 'get_object') else ap
-            n_ref = ap_obj.get('/N')
-            if not n_ref: continue
-            n_obj = n_ref.get_object() if hasattr(n_ref, 'get_object') else n_ref
-            ap_bytes = n_obj.get_data()
             rect = obj.get('/Rect')
-            if not ap_bytes or not rect: continue
-            x0, y0 = float(rect[0]), float(rect[1])
-            txt = ap_bytes.decode('latin-1', errors='replace').strip()
-            overlay_parts.append('q 1 0 0 1 ' + str(round(x0,3)) + ' ' + str(round(y0,3)) + ' cm\n' + txt + '\nQ')
-        except: continue
+            if not rect:
+                continue
+            x0, y0, x1, y1 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+            h = max(y1 - y0, 6)
+
+            # --- Try appearance stream first (/AP /N) ---
+            ap = obj.get('/AP')
+            if ap:
+                ap_obj = ap.get_object() if hasattr(ap, 'get_object') else ap
+                n_ref = ap_obj.get('/N')
+                if n_ref:
+                    n_obj = n_ref.get_object() if hasattr(n_ref, 'get_object') else n_ref
+                    try:
+                        ap_bytes = n_obj.get_data()
+                        if ap_bytes and ap_bytes.strip():
+                            txt = ap_bytes.decode('latin-1', errors='replace').strip()
+                            overlay_parts.append(
+                                'q 1 0 0 1 ' + str(round(x0, 3)) + ' ' + str(round(y0, 3)) + ' cm\n' + txt + '\nQ'
+                            )
+                            continue
+                    except Exception:
+                        pass
+
+            # --- Fallback: render /V value as plain text at field position ---
+            raw_val = obj.get('/V')
+            if raw_val is None:
+                continue
+            val_str = str(raw_val)
+            # PDF name objects start with '/'; strip that prefix
+            if val_str.startswith('/'):
+                val_str = val_str[1:]
+            val_str = val_str.strip()
+            if not val_str or val_str in ('', 'Off', 'None', 'nan'):
+                continue
+            fs = max(6, min(10, h * 0.65))
+            esc = val_str.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+            overlay_parts.append(
+                'q BT /Helvetica ' + str(round(fs, 1)) + ' Tf ' +
+                str(round(x0 + 2, 2)) + ' ' + str(round(y0 + (h - fs) / 2, 2)) +
+                ' Td (' + esc + ') Tj ET Q'
+            )
+        except Exception:
+            continue
+
     if overlay_parts:
-        from pypdf.generic import ArrayObject
         overlay = '\n'.join(overlay_parts).encode('latin-1', errors='replace')
         stream = DecodedStreamObject()
         stream.set_data(overlay)
@@ -690,6 +722,7 @@ def flatten_with_pdftk(pdf_buf):
             existing.append(stream_ref)
         else:
             page[NameObject('/Contents')] = ArrayObject([existing, stream_ref])
+
     if '/Annots' in page:
         del page[NameObject('/Annots')]
     if '/AcroForm' in writer._root_object:
