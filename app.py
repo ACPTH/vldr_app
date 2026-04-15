@@ -631,6 +631,7 @@ def _pdftk_cmd():
     java = shutil.which('java') or '/usr/bin/java'
     if os.path.isfile(java):
         for jar in [
+            '/usr/share/pdftk/pdftk.jar',
             '/usr/share/java/pdftk-all.jar',
             '/usr/share/pdftk-java/pdftk-all.jar',
             '/usr/share/java/pdftk.jar',
