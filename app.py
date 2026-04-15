@@ -23,6 +23,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 # SECRET_KEY must be set in environment for production (Render sets it automatically)
 _default_key = 'vldr-local-dev-' + __import__('hashlib').md5(b'vldr').hexdigest()
 app.secret_key = os.environ.get('SECRET_KEY', _default_key)
+app.config['SESSION_COOKIE_NAME'] = 'vldr_session'
 app.permanent_session_lifetime = timedelta(hours=8)
 
 # ── Portal SSO ─────────────────────────────────────────────────
