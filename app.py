@@ -570,11 +570,24 @@ MANUAL_FIELDS = {
                    ('Vessel',           'Transport Ref / Vessel',          'text')],
 }
 
-#  Helpers 
+#  Helpers
+_PDF_SYMBOL_MAP = {
+    '≥': '>=', '≤': '<=', '≠': '!=', '≈': '~=',
+    '→': '->', '←': '<-', '↔': '<->',
+    '×': 'x', '÷': '/', '±': '+/-',
+    '²': '2', '³': '3', '¹': '1',
+    '½': '1/2', '¼': '1/4', '¾': '3/4',
+    '’': "'", '‘': "'", '“': '"', '”': '"',
+    '–': '-', '—': '-',
+}
+
 def s(v):
     if v is None: return ''
     t = str(v).strip()
-    return '' if t in ('nan','NaN','None','-') else t
+    if t in ('nan','NaN','None','-'): return ''
+    for src, dst in _PDF_SYMBOL_MAP.items():
+        t = t.replace(src, dst)
+    return t
 
 def is_stellantis_transport(cls):
     return s(cls).lower().strip() in STELLANTIS_TRANSPORT
@@ -831,6 +844,12 @@ def fill_pdf(template_path, field_data, font_sizes):
     buf.seek(0)
     return buf
 
+def _fdf_hex_string(text):
+    """Encode text as a PDF hex string (UTF-16BE with BOM).
+    Avoids issues with <, >, and non-latin-1 characters in pdftk-java."""
+    encoded = str(text).encode('utf-16-be')
+    return '<FEFF' + encoded.hex().upper() + '>'
+
 def _make_fdf(field_data):
     """Build minimal FDF bytes so pdftk fill_form can fill a PDF template."""
     lines = ['%FDF-1.2', '1 0 obj', '<< /FDF << /Fields [']
@@ -838,10 +857,10 @@ def _make_fdf(field_data):
         if value is None:
             value = ''
         ne = str(name).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
-        ve = str(value).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
-        lines.append('<< /T (' + ne + ') /V (' + ve + ') >>')
+        ve = _fdf_hex_string(value)
+        lines.append('<< /T (' + ne + ') /V ' + ve + ' >>')
     lines += ['] >> >>', 'endobj', 'trailer', '<< /Root 1 0 R >>', '%%EOF']
-    return ('\n'.join(lines) + '\n').encode('latin-1', errors='replace')
+    return ('\n'.join(lines) + '\n').encode('ascii')
 
 def _pdftk_fill_form(template_path, field_data, font_sizes):
     """Fill and flatten a PDF using pdftk fill_form + FDF — most reliable with pdftk-java.
